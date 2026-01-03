@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Contest Puppeteer",
+  "version": "0.1.0",
+  "description": "Run Puppeteer tests from your browser",
+  "permissions": ["debugger", "activeTab", "scripting", "tabs"],
+  "host_permissions": ["<all_urls>"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Contest Puppeteer"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  }
+}
