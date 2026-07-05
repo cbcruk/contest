@@ -1,30 +1,54 @@
 # contest
 
-Browser-based test runner that runs tests in actual browsers, not Node.js + jsdom.
+Assert against the browser tab you're **already looking at** — no fresh browser
+launch, no Node + jsdom.
+
+Contest is a Chrome extension that attaches to your current, live tab over the
+Chrome DevTools Protocol (via `puppeteer-core`) and runs `describe`/`it`/`expect`
+tests against it — with your real session, cookies, and page state intact.
 
 ## Why?
 
-Frontend tests should run where frontend code runs - in real browsers. This gives you:
+Frontend tests should run where frontend code runs — in real browsers, against
+the real page:
 
 - Real DOM APIs, not jsdom approximations
 - Actual browser behavior (layout, events, timing)
-- Test what users actually experience
+- The **live** page as it actually is (logged in, mid-flow), not a fresh context
+
+Most browser-automation tools launch a new, empty browser. Contest instead
+attaches to the tab in front of you. See [`docs/direction.md`](docs/direction.md)
+for the reasoning and roadmap.
+
+> ⚠️ **Read-only by default is the goal.** Attaching to a live tab means
+> interactions (`click`, `type`, navigation) mutate real application state —
+> possibly against a production backend. Prefer observation
+> (`title`, `$eval`, computed style, visibility). Treat mutation as an explicit,
+> deliberate opt-in. See the roadmap in [`docs/direction.md`](docs/direction.md).
 
 ## Packages
 
-| Package            | Description                                 |
-| ------------------ | ------------------------------------------- |
-| `@contest/core`    | Test framework - `describe`, `it`, `expect` |
-| `@contest/sandbox` | Code execution with TypeScript support      |
+| Package             | Description                                              |
+| ------------------- | ------------------------------------------------------- |
+| `@contest/core`     | Test framework — `describe`, `it`, `expect`, results    |
+| `@contest/e2e`      | Attach to a live tab (`connect`, `withPage`) over CDP   |
+| `@contest/extension`| Chrome extension: run tests against the current tab     |
+| `@contest/sandbox`  | ⚠️ Legacy — unsandboxed `execute`, slated for removal    |
 
 ## Usage
 
-### Basic Test
+### Writing tests
+
+`@contest/core` is the single runner. Tests run **serially** in registration
+order (an attach session can't run concurrently against one tab), so always
+`await` a suite before reading its results.
 
 ```typescript
 import { describe, it, expect, getResults, clearResults } from '@contest/core'
 
-describe('Calculator', () => {
+clearResults()
+
+await describe('Calculator', () => {
   it('adds numbers', () => {
     expect(1 + 2).toBe(3)
   })
@@ -34,39 +58,41 @@ describe('Calculator', () => {
   })
 })
 
-const results = getResults()
-console.log(results)
+console.log(getResults())
 // [{ name: 'Calculator', tests: [{ name: 'adds numbers', passed: true }, ...] }]
 ```
 
-### Dynamic Code Execution
+### Attaching to the live tab
+
+`@contest/e2e` gives each test a `Page` bound to your current tab over CDP:
 
 ```typescript
-import { execute } from '@contest/sandbox'
+import { describe, it, expect } from '@contest/core'
+import { withPage } from '@contest/e2e'
 
-// Execute JavaScript
-const result = await execute('return 1 + 1')
-// { success: true, data: 2 }
+await describe('Page', () => {
+  it('has a title', withPage(async (page) => {
+    const title = await page.title()
+    expect(title).toBeTruthy()
+  }))
 
-// Execute TypeScript
-const result = await execute('const x: number = 42; return x', {
-  typescript: true,
+  it('renders an h1', withPage(async (page) => {
+    const h1 = await page.$('h1')
+    expect(h1).toBeTruthy()
+  }))
 })
-// { success: true, data: 42 }
-
-// With timeout
-const result = await execute(code, { timeout: 1000 })
 ```
 
-### DOM Testing
+### Streaming results to a UI
+
+Register a reporter to receive each result as it is recorded (used by the
+extension popup):
 
 ```typescript
-describe('Button', () => {
-  it('responds to click', () => {
-    const btn = document.getElementById('my-button')
-    btn.click()
-    expect(btn.textContent).toBe('Clicked!')
-  })
+import { setReporter, describe, it } from '@contest/core'
+
+setReporter((test) => {
+  console.log(test.passed ? '✓' : '✗', test.name)
 })
 ```
 
@@ -74,63 +100,51 @@ describe('Button', () => {
 
 ### @contest/core
 
-#### `describe(name, fn)`
+#### `describe(name, fn): Promise<void>`
 
-Defines a test suite.
+Defines a test suite. Always `await` it — tests run serially and results are
+only complete once the returned promise resolves.
 
 #### `it(name, fn)`
 
-Defines a test case. Must be inside `describe()`.
+Defines a test case. Must be called synchronously inside a `describe()` callback;
+throws otherwise. `fn` may be sync or async.
 
 #### `expect(value)`
 
 Creates assertions:
 
-- `.toBe(expected)` - Strict equality (`===`)
-- `.toEqual(expected)` - Deep equality (JSON comparison)
-- `.toBeTruthy()` - Truthy check
-- `.toBeFalsy()` - Falsy check
-- `.toBeNull()` - Null check
-- `.toBeUndefined()` - Undefined check
+- `.toBe(expected)` — strict equality (`===`)
+- `.toEqual(expected)` — deep equality (JSON comparison)
+- `.toBeTruthy()` / `.toBeFalsy()`
+- `.toBeNull()` / `.toBeUndefined()`
 
-#### `getResults()`
+#### `getResults()` / `clearResults()`
 
-Returns all test results as `SuiteResult[]`.
+Read all collected `SuiteResult[]`, or reset before a new run.
 
-#### `clearResults()`
+#### `setReporter(fn | null)`
 
-Clears all results. Call before running new tests.
+Subscribe to per-test results as they are recorded; pass `null` to unsubscribe.
 
-### @contest/sandbox
+### @contest/e2e
 
-#### `execute(code, options?)`
+#### `connect(options?)`
 
-Executes code and returns result.
+Connects to a browser over CDP and returns a puppeteer `Browser`.
 
-Options:
+#### `withPage(fn, options?)`
 
-- `timeout?: number` - Max execution time (default: 5000ms)
-- `typescript?: boolean` - Enable TypeScript transpilation
-- `setup?: () => void` - Setup function before execution
-
-Returns:
-
-```typescript
-interface ExecuteResult<T> {
-  success: boolean
-  data?: T
-  error?: string
-}
-```
+Wraps an async test body so it receives a `Page` attached to the active tab.
+Use inside `it()`.
 
 ## TODO
 
-- [ ] Nested `describe` blocks
-- [ ] Async test support (`async/await` in `it`)
+- [ ] Read-only default + explicit mutation opt-in with a production-origin guard
 - [ ] More matchers (`toThrow`, `toContain`, `toHaveLength`, etc.)
-- [ ] `beforeEach` / `afterEach` hooks
+- [ ] Nested `describe` blocks
 - [ ] `it.skip` / `it.only`
-- [ ] DevTools extension for better DX
-- [ ] Test file auto-discovery
-- [ ] Watch mode
-- [ ] Custom reporters
+- [ ] Reconcile or remove `docs/extension-design.md` (describes a different,
+      superseded DevTools-sidebar design)
+- [ ] Remove `@contest/sandbox` once nothing depends on it
+- [ ] Test file auto-discovery, watch mode, custom reporters

@@ -20,8 +20,33 @@ export interface SuiteResult {
   tests: TestResult[]
 }
 
+/**
+ * Callback invoked each time a test result is recorded.
+ * Lets a UI (e.g. the extension popup) stream results as they complete
+ * without re-implementing the runner.
+ */
+export type Reporter = (test: TestResult) => void
+
 let currentSuite: SuiteResult | null = null
 let results: SuiteResult[] = []
+let reporter: Reporter | null = null
+
+/**
+ * Registers a reporter that is notified for every recorded test result.
+ * Pass `null` to unsubscribe.
+ *
+ * @param fn - Reporter callback, or null to clear
+ *
+ * @example
+ * ```typescript
+ * setReporter((test) => {
+ *   console.log(test.passed ? '✓' : '✗', test.name)
+ * })
+ * ```
+ */
+export function setReporter(fn: Reporter | null): void {
+  reporter = fn
+}
 
 /**
  * Creates a new test suite. Called internally by `describe()`.
@@ -64,6 +89,7 @@ export function addTest(test: TestResult): void {
   }
 
   currentSuite.tests.push(test)
+  reporter?.(test)
 }
 
 /**

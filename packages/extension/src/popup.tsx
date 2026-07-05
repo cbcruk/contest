@@ -6,17 +6,15 @@ import {
 } from 'puppeteer-core/lib/esm/puppeteer/puppeteer-core-browser.js'
 import './styles.css'
 import {
+  describe,
+  it,
   expect,
   type TestResult,
   type SuiteResult,
   getResults,
   clearResults,
-  createSuite,
-  finalizeSuite,
-  addTest,
+  setReporter,
 } from '@contest/core'
-
-let pendingTests: (() => Promise<void>)[] = []
 
 type Page = Awaited<ReturnType<Awaited<ReturnType<typeof connect>>['pages']>>[0]
 
@@ -84,43 +82,15 @@ function App(): preact.JSX.Element {
 
     clearResults()
 
-    const addTestWithUI = (test: TestResult): void => {
-      addTest(test)
-
+    // Stream each result to the UI log as the shared runner records it.
+    setReporter((test: TestResult) => {
       log(
         `${test.passed ? '\u2713' : '\u2717'} ${test.name}${
           test.error ? `: ${test.error}` : ''
         }`,
         test.passed ? 'success' : 'error'
       )
-    }
-
-    const describe = async (
-      name: string,
-      fn: () => void | Promise<void>
-    ): Promise<void> => {
-      createSuite(name)
-      pendingTests = []
-      const result = fn()
-      if (result instanceof Promise) await result
-      for (const test of pendingTests) {
-        await test()
-      }
-      finalizeSuite()
-      pendingTests = []
-    }
-
-    const it = (name: string, fn: () => void | Promise<void>): void => {
-      pendingTests.push(async () => {
-        try {
-          await fn()
-          addTestWithUI({ name, passed: true })
-        } catch (e) {
-          const error = e instanceof Error ? e.message : String(e)
-          addTestWithUI({ name, passed: false, error })
-        }
-      })
-    }
+    })
 
     try {
       log('Running tests with contest + withPage...')
@@ -169,6 +139,8 @@ function App(): preact.JSX.Element {
       const error = e instanceof Error ? e.message : String(e)
       log(`Error: ${error}`, 'error')
       setState((prev) => ({ ...prev, running: false }))
+    } finally {
+      setReporter(null)
     }
   }, [log])
 

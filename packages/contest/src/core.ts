@@ -1,6 +1,14 @@
 import { addTest, createSuite, finalizeSuite } from './results'
 
-let pendingTests: Promise<void>[] = []
+/**
+ * Queue of registered-but-not-yet-run test thunks for the active suite.
+ * Tests run **serially** (one awaited at a time), not concurrently: an
+ * attach-based runner (puppeteer over CDP) cannot open concurrent sessions
+ * against the same tab, so serial execution is the only safe model.
+ */
+let pendingTests: (() => Promise<void>)[] = []
+/** True only while a `describe` callback is synchronously registering `it`s. */
+let collecting = false
 
 /**
  * Defines a test suite containing related test cases.
@@ -28,22 +36,29 @@ let pendingTests: Promise<void>[] = []
  * })
  * ```
  */
-export function describe(name: string, fn: () => void | Promise<void>): Promise<void> {
+export async function describe(
+  name: string,
+  fn: () => void | Promise<void>
+): Promise<void> {
   createSuite(name)
   pendingTests = []
 
-  const result = fn()
-
-  const finalize = async (): Promise<void> => {
+  collecting = true
+  try {
+    const result = fn()
     if (result instanceof Promise) {
       await result
     }
-    await Promise.all(pendingTests)
-    finalizeSuite()
-    pendingTests = []
+  } finally {
+    collecting = false
   }
 
-  return finalize()
+  for (const test of pendingTests) {
+    await test()
+  }
+
+  finalizeSuite()
+  pendingTests = []
 }
 
 /**
@@ -69,7 +84,11 @@ export function describe(name: string, fn: () => void | Promise<void>): Promise<
  * ```
  */
 export function it(name: string, fn: () => void | Promise<void>): void {
-  const runTest = async (): Promise<void> => {
+  if (!collecting) {
+    throw new Error('it() must be called inside describe()')
+  }
+
+  pendingTests.push(async () => {
     try {
       await fn()
       addTest({ name, passed: true })
@@ -77,10 +96,7 @@ export function it(name: string, fn: () => void | Promise<void>): void {
       const error = e instanceof Error ? e.message : String(e)
       addTest({ name, passed: false, error })
     }
-  }
-
-  const testPromise = runTest()
-  pendingTests.push(testPromise)
+  })
 }
 
 /**
