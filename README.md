@@ -117,6 +117,25 @@ throws otherwise. `fn` may be sync or async.
 
 `describe` blocks may be nested; nested suites are reported as `Parent > Child`.
 
+#### `beforeEach(fn)` / `afterEach(fn)`
+
+Register setup/teardown run around each test in the current suite and its
+nested suites. `beforeEach` runs outermost→innermost, `afterEach` the reverse.
+`afterEach` runs even if the test (or a `beforeEach`) throws. Must be called
+inside a `describe()`.
+
+```typescript
+await describe('Cart', () => {
+  let cart
+  beforeEach(() => { cart = new Cart() })
+  afterEach(() => { cart.dispose() })
+
+  it('starts empty', () => {
+    expect(cart.items).toHaveLength(0)
+  })
+})
+```
+
 #### `expect(value)`
 
 Creates assertions:
@@ -171,6 +190,7 @@ uses it internally.
 - [x] `it.skip` / `it.only`
 - [x] Unify the popup's inline `withPage` with `@contest/e2e`
 - [x] User-authored tests in the popup (editable, persisted via `chrome.storage`)
-- [ ] `beforeEach` / `afterEach` hooks
+- [x] `beforeEach` / `afterEach` hooks
+- [ ] `beforeAll` / `afterAll` hooks
 - [ ] Bundle-size reduction (popup bundles puppeteer-core)
 - [ ] Test file auto-discovery, watch mode, custom reporters

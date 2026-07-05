@@ -56,7 +56,8 @@
 - [x] matcher 확장(`toContain`, `toThrow`, `toHaveLength`)
 - [x] 팝업 인라인 `withPage`를 `@contest/e2e`로 통합 + 사용자 작성 테스트(편집·`chrome.storage` 보존)
 - [x] 중첩 `describe`, `it.skip`/`it.only` (수집→실행 2단계 모델)
-- [ ] `beforeEach`/`afterEach` 훅
+- [x] `beforeEach`/`afterEach` 훅 (조상 상속, 실패해도 afterEach 실행)
+- [ ] `beforeAll`/`afterAll` 훅
 - [ ] 번들 크기 절감(팝업이 puppeteer-core 포함)
 
 ## 5. 한 줄 재개 지점

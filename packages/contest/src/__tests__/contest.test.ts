@@ -3,6 +3,8 @@ import {
   describe as contestDescribe,
   it as contestIt,
   expect as contestExpect,
+  beforeEach as contestBeforeEach,
+  afterEach as contestAfterEach,
   getResults,
   clearResults,
   setReporter,
@@ -290,6 +292,125 @@ test('it.only runs only focused tests across the whole tree', async () => {
   vitestExpect(ran).toEqual(['focused', 'nested focused'])
   const recorded = getResults().flatMap((s) => s.tests.map((t) => t.name))
   vitestExpect(recorded).toEqual(['focused', 'nested focused'])
+})
+
+test('beforeEach and afterEach run around each test', async () => {
+  const events: string[] = []
+
+  await contestDescribe('Hooks', () => {
+    contestBeforeEach(() => {
+      events.push('before')
+    })
+    contestAfterEach(() => {
+      events.push('after')
+    })
+    contestIt('test 1', () => {
+      events.push('test 1')
+    })
+    contestIt('test 2', () => {
+      events.push('test 2')
+    })
+  })
+
+  vitestExpect(events).toEqual([
+    'before',
+    'test 1',
+    'after',
+    'before',
+    'test 2',
+    'after',
+  ])
+})
+
+test('hooks nest: outer before → inner before → test → inner after → outer after', async () => {
+  const events: string[] = []
+
+  await contestDescribe('Outer', () => {
+    contestBeforeEach(() => {
+      events.push('outer before')
+    })
+    contestAfterEach(() => {
+      events.push('outer after')
+    })
+    contestDescribe('Inner', () => {
+      contestBeforeEach(() => {
+        events.push('inner before')
+      })
+      contestAfterEach(() => {
+        events.push('inner after')
+      })
+      contestIt('t', () => {
+        events.push('test')
+      })
+    })
+  })
+
+  vitestExpect(events).toEqual([
+    'outer before',
+    'inner before',
+    'test',
+    'inner after',
+    'outer after',
+  ])
+})
+
+test('afterEach runs even when the test fails', async () => {
+  let cleanedUp = false
+
+  await contestDescribe('Cleanup', () => {
+    contestAfterEach(() => {
+      cleanedUp = true
+    })
+    contestIt('fails', () => {
+      contestExpect(1).toBe(2)
+    })
+  })
+
+  const test = getResults()[0].tests[0]
+  vitestExpect(test.passed).toBe(false)
+  vitestExpect(cleanedUp).toBe(true)
+})
+
+test('a throwing beforeEach fails the test and still runs afterEach', async () => {
+  let cleanedUp = false
+  let testRan = false
+
+  await contestDescribe('SetupFails', () => {
+    contestBeforeEach(() => {
+      throw new Error('setup boom')
+    })
+    contestAfterEach(() => {
+      cleanedUp = true
+    })
+    contestIt('never runs its body', () => {
+      testRan = true
+    })
+  })
+
+  const test = getResults()[0].tests[0]
+  vitestExpect(test.passed).toBe(false)
+  vitestExpect(test.error).toContain('setup boom')
+  vitestExpect(testRan).toBe(false)
+  vitestExpect(cleanedUp).toBe(true)
+})
+
+test('skipped tests do not run hooks', async () => {
+  let hookRan = false
+
+  await contestDescribe('SkipHooks', () => {
+    contestBeforeEach(() => {
+      hookRan = true
+    })
+    contestIt.skip('skipped', () => {})
+  })
+
+  vitestExpect(hookRan).toBe(false)
+})
+
+test('beforeEach throws when called outside describe', () => {
+  vitestExpect(() => {
+    contestBeforeEach(() => {})
+  }).toThrow('beforeEach() must be called inside describe()')
 })
 
 test('clearResults resets all results', async () => {
