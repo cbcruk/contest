@@ -7,6 +7,8 @@ import {
   expect,
   beforeEach,
   afterEach,
+  beforeAll,
+  afterAll,
   type TestResult,
   type SuiteResult,
   getResults,
@@ -123,11 +125,23 @@ function App(): preact.JSX.Element {
         'expect',
         'beforeEach',
         'afterEach',
+        'beforeAll',
+        'afterAll',
         'withPage',
         'log',
         code
       )
-      await run(describe, it, expect, beforeEach, afterEach, withPage, log)
+      await run(
+        describe,
+        it,
+        expect,
+        beforeEach,
+        afterEach,
+        beforeAll,
+        afterAll,
+        withPage,
+        log
+      )
 
       const suites = getResults()
       const total = suites.flatMap((s: SuiteResult) => s.tests)

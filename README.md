@@ -117,12 +117,17 @@ throws otherwise. `fn` may be sync or async.
 
 `describe` blocks may be nested; nested suites are reported as `Parent > Child`.
 
-#### `beforeEach(fn)` / `afterEach(fn)`
+#### `beforeEach(fn)` / `afterEach(fn)` / `beforeAll(fn)` / `afterAll(fn)`
 
-Register setup/teardown run around each test in the current suite and its
-nested suites. `beforeEach` runs outermost→innermost, `afterEach` the reverse.
-`afterEach` runs even if the test (or a `beforeEach`) throws. Must be called
-inside a `describe()`.
+Register setup/teardown for the current suite and its nested suites. Must be
+called inside a `describe()`.
+
+- `beforeEach` / `afterEach` run around **each** test. `beforeEach` runs
+  outermost→innermost, `afterEach` the reverse; `afterEach` runs even if the
+  test (or a `beforeEach`) throws.
+- `beforeAll` / `afterAll` run **once** for the suite (only if it has a test
+  that will run). A failing `beforeAll` fails every test in the block but
+  `afterAll` still runs; a failing `afterAll` surfaces as a synthetic result.
 
 ```typescript
 await describe('Cart', () => {
@@ -191,6 +196,6 @@ uses it internally.
 - [x] Unify the popup's inline `withPage` with `@contest/e2e`
 - [x] User-authored tests in the popup (editable, persisted via `chrome.storage`)
 - [x] `beforeEach` / `afterEach` hooks
-- [ ] `beforeAll` / `afterAll` hooks
+- [x] `beforeAll` / `afterAll` hooks
 - [ ] Bundle-size reduction (popup bundles puppeteer-core)
 - [ ] Test file auto-discovery, watch mode, custom reporters

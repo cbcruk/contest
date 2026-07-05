@@ -5,6 +5,8 @@ import {
   expect as contestExpect,
   beforeEach as contestBeforeEach,
   afterEach as contestAfterEach,
+  beforeAll as contestBeforeAll,
+  afterAll as contestAfterAll,
   getResults,
   clearResults,
   setReporter,
@@ -411,6 +413,87 @@ test('beforeEach throws when called outside describe', () => {
   vitestExpect(() => {
     contestBeforeEach(() => {})
   }).toThrow('beforeEach() must be called inside describe()')
+})
+
+test('beforeAll runs once before all tests, afterAll once after', async () => {
+  const events: string[] = []
+
+  await contestDescribe('AllHooks', () => {
+    contestBeforeAll(() => {
+      events.push('beforeAll')
+    })
+    contestAfterAll(() => {
+      events.push('afterAll')
+    })
+    contestIt('t1', () => {
+      events.push('t1')
+    })
+    contestIt('t2', () => {
+      events.push('t2')
+    })
+  })
+
+  vitestExpect(events).toEqual(['beforeAll', 't1', 't2', 'afterAll'])
+})
+
+test('a failing beforeAll fails every test but still runs afterAll', async () => {
+  let afterAllRan = false
+  const bodiesRan: string[] = []
+
+  await contestDescribe('BeforeAllFails', () => {
+    contestBeforeAll(() => {
+      throw new Error('setup exploded')
+    })
+    contestAfterAll(() => {
+      afterAllRan = true
+    })
+    contestIt('a', () => {
+      bodiesRan.push('a')
+    })
+    contestIt('b', () => {
+      bodiesRan.push('b')
+    })
+  })
+
+  const tests = getResults()[0].tests
+  vitestExpect(tests.map((t) => t.passed)).toEqual([false, false])
+  vitestExpect(tests[0].error).toContain('setup exploded')
+  vitestExpect(bodiesRan).toEqual([])
+  vitestExpect(afterAllRan).toBe(true)
+})
+
+test('beforeAll does not run when every test is skipped', async () => {
+  let beforeAllRan = false
+
+  await contestDescribe('AllSkipped', () => {
+    contestBeforeAll(() => {
+      beforeAllRan = true
+    })
+    contestIt.skip('nope', () => {})
+  })
+
+  vitestExpect(beforeAllRan).toBe(false)
+})
+
+test('a failing afterAll surfaces as a synthetic result', async () => {
+  await contestDescribe('AfterAllFails', () => {
+    contestAfterAll(() => {
+      throw new Error('teardown boom')
+    })
+    contestIt('ok', () => {})
+  })
+
+  const tests = getResults()[0].tests
+  const synthetic = tests.find((t) => t.name.includes('afterAll'))
+  vitestExpect(tests[0].passed).toBe(true)
+  vitestExpect(synthetic?.passed).toBe(false)
+  vitestExpect(synthetic?.error).toContain('teardown boom')
+})
+
+test('afterAll throws when called outside describe', () => {
+  vitestExpect(() => {
+    contestAfterAll(() => {})
+  }).toThrow('afterAll() must be called inside describe()')
 })
 
 test('clearResults resets all results', async () => {

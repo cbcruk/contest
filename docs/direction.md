@@ -57,7 +57,7 @@
 - [x] 팝업 인라인 `withPage`를 `@contest/e2e`로 통합 + 사용자 작성 테스트(편집·`chrome.storage` 보존)
 - [x] 중첩 `describe`, `it.skip`/`it.only` (수집→실행 2단계 모델)
 - [x] `beforeEach`/`afterEach` 훅 (조상 상속, 실패해도 afterEach 실행)
-- [ ] `beforeAll`/`afterAll` 훅
+- [x] `beforeAll`/`afterAll` 훅 (스위트당 1회, beforeAll 실패 시 블록 전체 실패 + afterAll은 실행)
 - [ ] 번들 크기 절감(팝업이 puppeteer-core 포함)
 
 ## 5. 한 줄 재개 지점

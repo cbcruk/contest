@@ -1,4 +1,12 @@
-export { describe, it, expect, beforeEach, afterEach } from './core'
+export {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+  beforeAll,
+  afterAll,
+} from './core'
 export {
   type TestResult,
   type SuiteResult,

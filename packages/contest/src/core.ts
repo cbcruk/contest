@@ -16,6 +16,8 @@ interface DescribeNode {
   children: Array<ItNode | DescribeNode>
   beforeEach: TestFn[]
   afterEach: TestFn[]
+  beforeAll: TestFn[]
+  afterAll: TestFn[]
 }
 
 /**
@@ -56,11 +58,21 @@ function hasOnly(node: DescribeNode): boolean {
   )
 }
 
+/** Whether the subtree has at least one test whose body will actually run. */
+function willExecute(node: DescribeNode, onlyActive: boolean): boolean {
+  return node.children.some((child) =>
+    child.kind === 'it'
+      ? (!onlyActive || child.only) && !child.skip
+      : willExecute(child, onlyActive)
+  )
+}
+
 async function runIt(
   node: ItNode,
   onlyActive: boolean,
   beforeEach: TestFn[],
-  afterEach: TestFn[]
+  afterEach: TestFn[],
+  blockedError: string | undefined
 ): Promise<void> {
   // When any `.only` exists in the tree, non-only tests are omitted entirely.
   if (onlyActive && !node.only) {
@@ -69,6 +81,12 @@ async function runIt(
   // Skipped tests don't run, and neither do their hooks (matching Jest).
   if (node.skip) {
     addTest({ name: node.name, passed: true, skipped: true })
+    return
+  }
+  // A failed beforeAll upstream fails every test in the block without running
+  // its body or per-test hooks.
+  if (blockedError !== undefined) {
+    addTest({ name: node.name, passed: false, error: blockedError })
     return
   }
 
@@ -101,7 +119,8 @@ async function runDescribe(
   node: DescribeNode,
   onlyActive: boolean,
   beforeEach: TestFn[],
-  afterEach: TestFn[]
+  afterEach: TestFn[],
+  blockedError: string | undefined
 ): Promise<void> {
   createSuite(node.name)
   // Hooks are inherited: beforeEach runs outermost→innermost, afterEach the
@@ -109,13 +128,40 @@ async function runDescribe(
   const before = [...beforeEach, ...node.beforeEach]
   const after = [...node.afterEach, ...afterEach]
 
+  // beforeAll/afterAll run once, and only when this subtree actually executes
+  // a test and isn't already blocked by an upstream beforeAll failure.
+  const runAll = blockedError === undefined && willExecute(node, onlyActive)
+  let localBlocked = blockedError
+  if (runAll) {
+    for (const hook of node.beforeAll) {
+      try {
+        await hook()
+      } catch (e) {
+        localBlocked = errMsg(e)
+        break
+      }
+    }
+  }
+
   // Tests run serially in registration order — an attach-based runner
   // (puppeteer over CDP) can't open concurrent sessions against one tab.
   for (const child of node.children) {
     if (child.kind === 'describe') {
-      await runDescribe(child, onlyActive, before, after)
+      await runDescribe(child, onlyActive, before, after, localBlocked)
     } else {
-      await runIt(child, onlyActive, before, after)
+      await runIt(child, onlyActive, before, after, localBlocked)
+    }
+  }
+
+  if (runAll) {
+    for (const hook of node.afterAll) {
+      try {
+        await hook()
+      } catch (e) {
+        // Surface an afterAll failure as a visible synthetic result rather
+        // than swallowing it — there's no user test to attach it to.
+        addTest({ name: `${node.name} afterAll`, passed: false, error: errMsg(e) })
+      }
     }
   }
   finalizeSuite()
@@ -156,6 +202,8 @@ export async function describe(name: string, fn: TestFn): Promise<void> {
     children: [],
     beforeEach: [],
     afterEach: [],
+    beforeAll: [],
+    afterAll: [],
   }
   const parent = currentParent()
   if (parent) {
@@ -175,8 +223,31 @@ export async function describe(name: string, fn: TestFn): Promise<void> {
 
   // Only the top-level describe executes; nested ones are run by their parent.
   if (!parent) {
-    await runDescribe(node, hasOnly(node), [], [])
+    await runDescribe(node, hasOnly(node), [], [], undefined)
   }
+}
+
+/**
+ * Registers a function to run once before the first test in the current suite
+ * (and its nested suites). If it throws, every test in the block fails with
+ * that error and its body/per-test hooks don't run, but `afterAll` still runs.
+ * Must be called inside a `describe()` block.
+ *
+ * @param fn - Setup function (sync or async)
+ */
+export function beforeAll(fn: TestFn): void {
+  requireParent('beforeAll').beforeAll.push(fn)
+}
+
+/**
+ * Registers a function to run once after the last test in the current suite
+ * (and its nested suites). Runs even if tests failed. Must be called inside a
+ * `describe()` block.
+ *
+ * @param fn - Teardown function (sync or async)
+ */
+export function afterAll(fn: TestFn): void {
+  requireParent('afterAll').afterAll.push(fn)
 }
 
 /**
