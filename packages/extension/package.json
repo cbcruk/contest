@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@contest/core": "workspace:*",
+    "@contest/e2e": "workspace:*",
     "preact": "^10.25.0",
     "puppeteer-core": "^24.0.0"
   },

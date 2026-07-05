@@ -1,45 +1,48 @@
 import { render } from 'preact'
-import { useState, useCallback } from 'preact/hooks'
-import {
-  connect,
-  ExtensionTransport,
-} from 'puppeteer-core/lib/esm/puppeteer/puppeteer-core-browser.js'
+import { useState, useCallback, useEffect } from 'preact/hooks'
 import './styles.css'
 import {
+  describe,
+  it,
   expect,
+  beforeEach,
+  afterEach,
+  beforeAll,
+  afterAll,
   type TestResult,
   type SuiteResult,
   getResults,
   clearResults,
-  createSuite,
-  finalizeSuite,
-  addTest,
+  setReporter,
 } from '@contest/core'
+import { withPage } from '@contest/e2e'
 
-let pendingTests: (() => Promise<void>)[] = []
+const STORAGE_KEY = 'contest:code'
 
-type Page = Awaited<ReturnType<Awaited<ReturnType<typeof connect>>['pages']>>[0]
+/**
+ * Seed shown on first open. `describe`, `it`, `expect`, `withPage` and `log`
+ * are injected into the user's code, so it reads like a normal test file.
+ * The page is read-only by default; pass `{ mutate: true }` to withPage to
+ * interact (allowed on local-dev origins only).
+ */
+const DEFAULT_CODE = [
+  "await describe('Page Content', () => {",
+  "  it('has a title', withPage(async (page) => {",
+  '    const title = await page.title()',
+  "    log('Title: ' + title)",
+  '    expect(title).toBeTruthy()',
+  '  }))',
+  '',
+  "  it('has an h1', withPage(async (page) => {",
+  "    const h1 = await page.$('h1')",
+  '    expect(h1).toBeTruthy()',
+  '  }))',
+  '})',
+].join('\n')
 
-function withPage(fn: (page: Page) => Promise<void>): () => Promise<void> {
-  return async (): Promise<void> => {
-    const [tab] = await chrome.tabs.query({
-      active: true,
-      currentWindow: true,
-    })
-
-    if (!tab.id) throw new Error('No active tab')
-
-    const transport = await ExtensionTransport.connectTab(tab.id)
-    const browser = await connect({ transport })
-    const [page] = await browser.pages()
-
-    try {
-      await fn(page)
-    } finally {
-      browser.disconnect()
-    }
-  }
-}
+const AsyncFunction = Object.getPrototypeOf(
+  async function () {}
+).constructor as new (...args: string[]) => (...args: unknown[]) => Promise<void>
 
 interface LogEntry {
   message: string
@@ -54,17 +57,34 @@ interface AppState {
 }
 
 function App(): preact.JSX.Element {
+  const [code, setCode] = useState<string>(DEFAULT_CODE)
   const [state, setState] = useState<AppState>({
     suites: [],
     logs: [
       {
-        message: 'Ready. Click "Run Tests" to start.',
+        message: 'Ready. Edit the tests and click "Run".',
         type: 'info',
         timestamp: new Date().toLocaleTimeString(),
       },
     ],
     running: false,
   })
+
+  // Restore the last-edited test source across popup opens.
+  useEffect(() => {
+    chrome.storage?.local.get(STORAGE_KEY).then((stored) => {
+      const saved = stored?.[STORAGE_KEY]
+      if (typeof saved === 'string' && saved.length > 0) {
+        setCode(saved)
+      }
+    })
+  }, [])
+
+  const onCodeInput = useCallback((e: Event) => {
+    const value = (e.target as HTMLTextAreaElement).value
+    setCode(value)
+    chrome.storage?.local.set({ [STORAGE_KEY]: value })
+  }, [])
 
   const log = useCallback(
     (message: string, type: LogEntry['type'] = 'info') => {
@@ -84,84 +104,55 @@ function App(): preact.JSX.Element {
 
     clearResults()
 
-    const addTestWithUI = (test: TestResult): void => {
-      addTest(test)
-
+    // Stream each result to the UI log as the shared runner records it.
+    setReporter((test: TestResult) => {
+      const mark = test.skipped ? '○' : test.passed ? '✓' : '✗'
       log(
-        `${test.passed ? '\u2713' : '\u2717'} ${test.name}${
-          test.error ? `: ${test.error}` : ''
-        }`,
-        test.passed ? 'success' : 'error'
+        `${mark} ${test.name}${test.error ? `: ${test.error}` : ''}`,
+        test.skipped ? 'info' : test.passed ? 'success' : 'error'
       )
-    }
-
-    const describe = async (
-      name: string,
-      fn: () => void | Promise<void>
-    ): Promise<void> => {
-      createSuite(name)
-      pendingTests = []
-      const result = fn()
-      if (result instanceof Promise) await result
-      for (const test of pendingTests) {
-        await test()
-      }
-      finalizeSuite()
-      pendingTests = []
-    }
-
-    const it = (name: string, fn: () => void | Promise<void>): void => {
-      pendingTests.push(async () => {
-        try {
-          await fn()
-          addTestWithUI({ name, passed: true })
-        } catch (e) {
-          const error = e instanceof Error ? e.message : String(e)
-          addTestWithUI({ name, passed: false, error })
-        }
-      })
-    }
+    })
 
     try {
-      log('Running tests with contest + withPage...')
+      log('Running tests against the current tab...')
 
-      await describe('Page Content', () => {
-        it(
-          'has a title',
-          withPage(async (page) => {
-            const title = await page.title()
-            log(`Title: "${title}"`)
-            expect(title).toBeTruthy()
-          })
-        )
-
-        it(
-          'has h1 element',
-          withPage(async (page) => {
-            const h1 = await page.$('h1')
-            expect(h1).toBeTruthy()
-          })
-        )
-
-        it(
-          'can extract text content',
-          withPage(async (page) => {
-            const body = await page.$eval('body', (el) =>
-              el.textContent?.slice(0, 50)
-            )
-            log(`Body preview: "${body}..."`)
-            expect(body).toBeTruthy()
-          })
-        )
-      })
+      // Evaluate the user's test source with the contest API in scope. This
+      // runs in the popup and drives the page over CDP via withPage; it makes
+      // no isolation claim about the page itself.
+      const run = new AsyncFunction(
+        'describe',
+        'it',
+        'expect',
+        'beforeEach',
+        'afterEach',
+        'beforeAll',
+        'afterAll',
+        'withPage',
+        'log',
+        code
+      )
+      await run(
+        describe,
+        it,
+        expect,
+        beforeEach,
+        afterEach,
+        beforeAll,
+        afterAll,
+        withPage,
+        log
+      )
 
       const suites = getResults()
       const total = suites.flatMap((s: SuiteResult) => s.tests)
-      const passed = total.filter((t: TestResult) => t.passed).length
+      const runnable = total.filter((t: TestResult) => !t.skipped)
+      const passed = runnable.filter((t: TestResult) => t.passed).length
+      const skipped = total.length - runnable.length
 
       log(
-        `Completed: ${passed}/${total.length} passed`,
-        passed === total.length ? 'success' : 'error'
+        `Completed: ${passed}/${runnable.length} passed` +
+          (skipped ? `, ${skipped} skipped` : ''),
+        passed === runnable.length ? 'success' : 'error'
       )
 
       setState((prev) => ({ ...prev, suites, running: false }))
@@ -169,12 +160,22 @@ function App(): preact.JSX.Element {
       const error = e instanceof Error ? e.message : String(e)
       log(`Error: ${error}`, 'error')
       setState((prev) => ({ ...prev, running: false }))
+    } finally {
+      setReporter(null)
     }
-  }, [log])
+  }, [code, log])
 
   return (
     <div class="p-4">
       <h1 class="text-base font-semibold text-primary mb-3">Contest E2E</h1>
+
+      <textarea
+        class="w-full h-40 p-2 mb-3 bg-dark-log text-[12px] font-mono rounded border border-gray-700 resize-y focus:outline-none focus:border-primary"
+        spellcheck={false}
+        value={code}
+        onInput={onCodeInput}
+        disabled={state.running}
+      />
 
       <div class="mb-3">
         {state.suites.length === 0 ? (
@@ -190,7 +191,11 @@ function App(): preact.JSX.Element {
                 >
                   <div
                     class={`w-2 h-2 rounded-full mr-2 ${
-                      test.passed ? 'bg-green-500' : 'bg-red-500'
+                      test.skipped
+                        ? 'bg-gray-500'
+                        : test.passed
+                        ? 'bg-green-500'
+                        : 'bg-red-500'
                     }`}
                   />
                   <span class="flex-1 text-[13px]">{test.name}</span>
