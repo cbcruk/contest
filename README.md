@@ -112,6 +112,11 @@ only complete once the returned promise resolves.
 Defines a test case. Must be called synchronously inside a `describe()` callback;
 throws otherwise. `fn` may be sync or async.
 
+- `it.skip(name, fn)` — record the test as skipped without running it.
+- `it.only(name, fn)` — run only `.only` tests within that top-level suite.
+
+`describe` blocks may be nested; nested suites are reported as `Parent > Child`.
+
 #### `expect(value)`
 
 Creates assertions:
@@ -162,8 +167,10 @@ uses it internally.
 - [x] Reconcile `docs/extension-design.md` with the shipped popup design
 - [x] Remove `@contest/sandbox`
 - [x] More matchers (`toThrow`, `toContain`, `toHaveLength`)
-- [ ] Nested `describe` blocks
-- [ ] `it.skip` / `it.only`
-- [ ] Unify the popup's inline `withPage` with `@contest/e2e`
-- [ ] User-authored tests in the popup (editor / file load)
+- [x] Nested `describe` blocks
+- [x] `it.skip` / `it.only`
+- [x] Unify the popup's inline `withPage` with `@contest/e2e`
+- [x] User-authored tests in the popup (editable, persisted via `chrome.storage`)
+- [ ] `beforeEach` / `afterEach` hooks
+- [ ] Bundle-size reduction (popup bundles puppeteer-core)
 - [ ] Test file auto-discovery, watch mode, custom reporters

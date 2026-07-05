@@ -1,103 +1,172 @@
 import { addTest, createSuite, finalizeSuite } from './results'
 
-/**
- * Queue of registered-but-not-yet-run test thunks for the active suite.
- * Tests run **serially** (one awaited at a time), not concurrently: an
- * attach-based runner (puppeteer over CDP) cannot open concurrent sessions
- * against the same tab, so serial execution is the only safe model.
- */
-let pendingTests: (() => Promise<void>)[] = []
-/** True only while a `describe` callback is synchronously registering `it`s. */
-let collecting = false
+type TestFn = () => void | Promise<void>
+
+interface ItNode {
+  kind: 'it'
+  name: string
+  fn: TestFn
+  skip: boolean
+  only: boolean
+}
+
+interface DescribeNode {
+  kind: 'describe'
+  name: string
+  children: Array<ItNode | DescribeNode>
+}
 
 /**
- * Defines a test suite containing related test cases.
- * Supports both sync and async test functions.
+ * Stack of `describe` nodes currently being collected. The top is the parent
+ * that `it`/`describe` registers into. Empty means we're at the top level,
+ * outside any suite.
+ */
+let describeStack: DescribeNode[] = []
+
+function currentParent(): DescribeNode | undefined {
+  return describeStack[describeStack.length - 1]
+}
+
+function register(node: ItNode): void {
+  const parent = currentParent()
+  if (!parent) {
+    throw new Error('it() must be called inside describe()')
+  }
+  parent.children.push(node)
+}
+
+/** Whether the subtree contains any `it.only` (at any depth). */
+function hasOnly(node: DescribeNode): boolean {
+  return node.children.some((child) =>
+    child.kind === 'it' ? child.only : hasOnly(child)
+  )
+}
+
+async function runIt(node: ItNode, onlyActive: boolean): Promise<void> {
+  // When any `.only` exists in the tree, non-only tests are omitted entirely.
+  if (onlyActive && !node.only) {
+    return
+  }
+  if (node.skip) {
+    addTest({ name: node.name, passed: true, skipped: true })
+    return
+  }
+  try {
+    await node.fn()
+    addTest({ name: node.name, passed: true })
+  } catch (e) {
+    const error = e instanceof Error ? e.message : String(e)
+    addTest({ name: node.name, passed: false, error })
+  }
+}
+
+async function runDescribe(
+  node: DescribeNode,
+  onlyActive: boolean
+): Promise<void> {
+  createSuite(node.name)
+  // Tests run serially in registration order — an attach-based runner
+  // (puppeteer over CDP) can't open concurrent sessions against one tab.
+  for (const child of node.children) {
+    if (child.kind === 'describe') {
+      await runDescribe(child, onlyActive)
+    } else {
+      await runIt(child, onlyActive)
+    }
+  }
+  finalizeSuite()
+}
+
+/**
+ * Defines a test suite containing related test cases. May be nested inside
+ * another `describe` (nested suites are flattened to `Parent > Child` names).
+ *
+ * A top-level `describe` collects its entire subtree (including nested
+ * `describe`s) before running anything, so `it.only` can select across the
+ * whole tree. Always `await` it — tests run serially and results are only
+ * complete once the returned promise resolves.
  *
  * @param name - Name of the test suite
  * @param fn - Function containing test cases defined with `it()`
- * @returns Promise that resolves when all tests complete (for async tests)
+ * @returns Promise that resolves when all tests in the tree complete
  *
  * @example
  * ```typescript
- * // Sync tests
- * describe('Calculator', () => {
+ * await describe('Calculator', () => {
  *   it('adds two numbers', () => {
  *     expect(1 + 2).toBe(3)
  *   })
- * })
  *
- * // Async tests
- * await describe('API', () => {
- *   it('fetches data', async () => {
- *     const data = await fetchData()
- *     expect(data).toBeTruthy()
+ *   describe('errors', () => {
+ *     it('throws on divide by zero', () => {
+ *       expect(() => divide(1, 0)).toThrow()
+ *     })
  *   })
  * })
  * ```
  */
-export async function describe(
-  name: string,
-  fn: () => void | Promise<void>
-): Promise<void> {
-  createSuite(name)
-  pendingTests = []
+export async function describe(name: string, fn: TestFn): Promise<void> {
+  const node: DescribeNode = { kind: 'describe', name, children: [] }
+  const parent = currentParent()
+  if (parent) {
+    parent.children.push(node)
+  }
 
-  collecting = true
+  // Collection phase: run the callback to register children (no test bodies).
+  describeStack.push(node)
   try {
     const result = fn()
     if (result instanceof Promise) {
       await result
     }
   } finally {
-    collecting = false
+    describeStack.pop()
   }
 
-  for (const test of pendingTests) {
-    await test()
+  // Only the top-level describe executes; nested ones are run by their parent.
+  if (!parent) {
+    await runDescribe(node, hasOnly(node))
   }
-
-  finalizeSuite()
-  pendingTests = []
 }
 
 /**
- * Defines a single test case within a test suite.
- * Must be called inside a `describe()` block.
- * Supports both sync and async test functions.
+ * Defines a single test case within a test suite. Must be called inside a
+ * `describe()` block (throws otherwise). Supports sync and async functions.
+ *
+ * - `it.skip(name, fn)` — record the test as skipped without running it.
+ * - `it.only(name, fn)` — run only `.only` tests within the top-level suite.
  *
  * @param name - Name describing what the test verifies
  * @param fn - Function containing assertions using `expect()`
  *
  * @example
  * ```typescript
- * // Sync test
  * it('should return true for valid input', () => {
  *   expect(isValid('test')).toBe(true)
  * })
  *
- * // Async test
- * it('should fetch data', async () => {
- *   const data = await fetchData()
- *   expect(data).toBeTruthy()
- * })
+ * it.skip('not ready yet', () => { ... })
+ * it.only('focus on this one', () => { ... })
  * ```
  */
-export function it(name: string, fn: () => void | Promise<void>): void {
-  if (!collecting) {
-    throw new Error('it() must be called inside describe()')
-  }
-
-  pendingTests.push(async () => {
-    try {
-      await fn()
-      addTest({ name, passed: true })
-    } catch (e) {
-      const error = e instanceof Error ? e.message : String(e)
-      addTest({ name, passed: false, error })
-    }
-  })
+interface ItApi {
+  (name: string, fn: TestFn): void
+  skip(name: string, fn: TestFn): void
+  only(name: string, fn: TestFn): void
 }
+
+const itBase = (name: string, fn: TestFn): void => {
+  register({ kind: 'it', name, fn, skip: false, only: false })
+}
+
+export const it: ItApi = Object.assign(itBase, {
+  skip(name: string, fn: TestFn): void {
+    register({ kind: 'it', name, fn, skip: true, only: false })
+  },
+  only(name: string, fn: TestFn): void {
+    register({ kind: 'it', name, fn, skip: false, only: true })
+  },
+})
 
 /**
  * Creates an assertion object for testing values.

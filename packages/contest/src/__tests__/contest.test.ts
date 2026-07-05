@@ -224,6 +224,74 @@ test('setReporter streams each result as it is recorded', async () => {
   vitestExpect(seen).toEqual(['a', 'b'])
 })
 
+test('nested describe flattens to Parent > Child suites', async () => {
+  await contestDescribe('Outer', () => {
+    contestIt('outer test', () => {})
+    contestDescribe('Inner', () => {
+      contestIt('inner test', () => {})
+    })
+  })
+
+  const results = getResults()
+  const outer = results.find((s) => s.name === 'Outer')
+  const inner = results.find((s) => s.name === 'Outer > Inner')
+  vitestExpect(outer?.tests.map((t) => t.name)).toEqual(['outer test'])
+  vitestExpect(inner?.tests.map((t) => t.name)).toEqual(['inner test'])
+})
+
+test('deeply nested describe joins all ancestor names', async () => {
+  await contestDescribe('A', () => {
+    contestDescribe('B', () => {
+      contestDescribe('C', () => {
+        contestIt('leaf', () => {})
+      })
+    })
+  })
+
+  const names = getResults().map((s) => s.name)
+  vitestExpect(names).toContain('A > B > C')
+})
+
+test('it.skip records a skipped test without running it', async () => {
+  let ran = false
+  await contestDescribe('Skips', () => {
+    contestIt.skip('skipped', () => {
+      ran = true
+    })
+    contestIt('runs', () => {})
+  })
+
+  const tests = getResults()[0].tests
+  vitestExpect(ran).toBe(false)
+  vitestExpect(tests[0].skipped).toBe(true)
+  vitestExpect(tests[0].passed).toBe(true)
+  vitestExpect(tests[1].skipped).toBeUndefined()
+})
+
+test('it.only runs only focused tests across the whole tree', async () => {
+  const ran: string[] = []
+  await contestDescribe('Focus', () => {
+    contestIt('normal', () => {
+      ran.push('normal')
+    })
+    contestIt.only('focused', () => {
+      ran.push('focused')
+    })
+    contestDescribe('nested', () => {
+      contestIt('nested normal', () => {
+        ran.push('nested normal')
+      })
+      contestIt.only('nested focused', () => {
+        ran.push('nested focused')
+      })
+    })
+  })
+
+  vitestExpect(ran).toEqual(['focused', 'nested focused'])
+  const recorded = getResults().flatMap((s) => s.tests.map((t) => t.name))
+  vitestExpect(recorded).toEqual(['focused', 'nested focused'])
+})
+
 test('clearResults resets all results', async () => {
   await contestDescribe('Suite 1', () => {
     contestIt('test', () => {})

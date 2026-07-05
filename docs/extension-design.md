@@ -104,9 +104,22 @@ try {
 └──────────────────────────────┘
 ```
 
+## User-authored tests
+
+팝업에는 편집 가능한 테스트 소스 영역이 있다. 기본 예제가 채워져 있고, 편집
+내용은 `chrome.storage.local`에 보존된다(권한: `storage`). "Run"을 누르면 그 소스를
+`describe`/`it`/`expect`/`withPage`/`log`를 주입한 `AsyncFunction`으로 팝업에서
+실행한다 — 페이지 격리를 주장하지 않으며, 실제 구동은 `withPage`가 CDP로 한다.
+
+```ts
+const run = new AsyncFunction('describe', 'it', 'expect', 'withPage', 'log', code)
+await run(describe, it, expect, withPage, log)
+```
+
+`withPage`는 `@contest/e2e`의 것을 그대로 쓴다(팝업이 별도로 재구현하지 않음).
+
 ## Open items
 
-- 팝업의 테스트는 현재 하드코딩된 데모다. 사용자 작성 테스트(에디터/파일 로드)를
-  받는 경로가 필요하다.
-- 팝업의 인라인 `withPage`와 `@contest/e2e`의 `withPage`를 하나로 합칠 것.
-- 번들 크기(현재 popup.js ~485KB, puppeteer-core 포함) 절감.
+- 테스트 소스에 TypeScript/JSX 지원(현재 순수 JS만).
+- 번들 크기(현재 popup.js ~490KB, puppeteer-core 포함) 절감.
+- 에러 위치(줄 번호) 매핑 등 에디터 DX.
