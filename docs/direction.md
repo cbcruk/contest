@@ -44,16 +44,17 @@
 2. **익스텐션 아키텍처는 puppeteer-CDP 팝업(이미 만든 것)으로 단일화.** 가치의 핵심: 새 브라우저를 띄우지 않고 **지금 로그인된 채 보고 있는 그 탭**에 그대로 붙는다 — puppeteer가 통상 fresh context를 여는 것과 반대. DevTools `inspectedWindow.eval` 방식은 이 attach가 상위호환하므로 접는다.
 3. **러너는 `@contest/core` 하나가 진실의 원천.** 직렬 thunk 모델로 통일하고 각 표면은 import만 한다. (버그 수정 겸함)
 4. **읽기전용을 기본 불변식으로 박는다.** assertion은 관측(title, `$eval`, computed style, 가시성, ARIA)이 기본. mutation(click/type/goto)은 명시적 opt-in, 궁극적으로 프로덕션 origin에서 거부하는 가드까지. (이전 노트 #74의 실현)
-5. **`@contest/sandbox`는 정리 대상.** 격리 0이고 아무도 안 쓴다. 인페이지 primitive가 다시 필요해지지 않는 한 축소/삭제.
+5. **`@contest/sandbox` 삭제됨.** 격리 0이고 아무도 안 썼다. 인페이지 primitive가 다시 필요해지면 재도입.
 
 ## 4. 로드맵 (재정렬)
 
 - [x] 러너 3중 재구현 → `@contest/core` 단일화 (+ 직렬 실행 버그 수정, reporter 훅)
-- [ ] README를 실제 정체성(puppeteer attach)에 정합화
-- [ ] 읽기전용 기본 + mutation opt-in 가드 설계
-- [ ] `docs/extension-design.md`를 실제 팝업 설계로 갱신하거나 제거
-- [ ] `@contest/sandbox` 축소/삭제 판단
-- [ ] matcher 확장(`toContain`, `toThrow`, `toHaveLength`), 프로덕션 origin 가드
+- [x] README를 실제 정체성(puppeteer attach)에 정합화
+- [x] 읽기전용 기본 + mutation opt-in 가드 (`@contest/e2e`의 `guardPage`, origin 허용목록)
+- [x] `docs/extension-design.md`를 실제 팝업 설계로 갱신
+- [x] `@contest/sandbox` 삭제
+- [x] matcher 확장(`toContain`, `toThrow`, `toHaveLength`)
+- [ ] 팝업 인라인 `withPage`를 `@contest/e2e`로 통합, 사용자 작성 테스트 경로
 
 ## 5. 한 줄 재개 지점
 

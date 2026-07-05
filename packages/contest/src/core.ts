@@ -154,6 +154,30 @@ export function expect<T>(actual: T): {
    * @throws Error if value is not undefined
    */
   toBeUndefined: () => void
+  /**
+   * Asserts a string contains a substring, or an array contains an element
+   * (via `===`).
+   *
+   * @param item - The substring or element expected to be present
+   * @throws Error if not contained, or if `actual` is neither string nor array
+   */
+  toContain: (item: unknown) => void
+  /**
+   * Asserts the value has a numeric `length` equal to `expected`.
+   * Works for strings, arrays, and any length-bearing object.
+   *
+   * @param expected - The expected length
+   * @throws Error if the length differs or is not numeric
+   */
+  toHaveLength: (expected: number) => void
+  /**
+   * Asserts that calling `actual` (a function) throws. Optionally checks the
+   * thrown error's message against a substring or RegExp.
+   *
+   * @param expected - Optional substring or RegExp the error message must match
+   * @throws Error if the function does not throw, or the message doesn't match
+   */
+  toThrow: (expected?: string | RegExp) => void
 } {
   return {
     toBe(expected: T): void {
@@ -190,6 +214,62 @@ export function expect<T>(actual: T): {
     toBeUndefined(): void {
       if (actual !== undefined) {
         throw new Error(`Expected undefined, but got ${JSON.stringify(actual)}`)
+      }
+    },
+    toContain(item: unknown): void {
+      if (typeof actual === 'string') {
+        if (!actual.includes(String(item))) {
+          throw new Error(`Expected "${actual}" to contain "${item}"`)
+        }
+        return
+      }
+      if (Array.isArray(actual)) {
+        if (!actual.includes(item)) {
+          throw new Error(
+            `Expected ${JSON.stringify(actual)} to contain ${JSON.stringify(
+              item
+            )}`
+          )
+        }
+        return
+      }
+      throw new Error('toContain() expects a string or array')
+    },
+    toHaveLength(expected: number): void {
+      const length = (actual as { length?: unknown } | null | undefined)?.length
+      if (typeof length !== 'number') {
+        throw new Error('toHaveLength() expects a value with a numeric length')
+      }
+      if (length !== expected) {
+        throw new Error(`Expected length ${expected}, but got ${length}`)
+      }
+    },
+    toThrow(expected?: string | RegExp): void {
+      if (typeof actual !== 'function') {
+        throw new Error('toThrow() expects a function')
+      }
+      let thrown: unknown
+      let threw = false
+      try {
+        ;(actual as () => unknown)()
+      } catch (e) {
+        threw = true
+        thrown = e
+      }
+      if (!threw) {
+        throw new Error('Expected function to throw, but it did not')
+      }
+      if (expected !== undefined) {
+        const message = thrown instanceof Error ? thrown.message : String(thrown)
+        const matches =
+          typeof expected === 'string'
+            ? message.includes(expected)
+            : expected.test(message)
+        if (!matches) {
+          throw new Error(
+            `Expected error matching ${expected}, but got "${message}"`
+          )
+        }
       }
     },
   }

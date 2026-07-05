@@ -8,3 +8,12 @@ export {
 } from './connect'
 
 export { withPage, type WithPageOptions, type PageTestFn } from './with-page'
+
+export {
+  guardPage,
+  isMutationAllowed,
+  hostOf,
+  DEFAULT_ALLOWED,
+  type GuardOptions,
+  type OriginMatcher,
+} from './guard'

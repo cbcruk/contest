@@ -134,6 +134,83 @@ test('expect.toEqual compares by value', async () => {
   vitestExpect(tests[2].passed).toBe(true)
 })
 
+test('expect.toContain checks strings and arrays', async () => {
+  await contestDescribe('toContain', () => {
+    contestIt('string contains substring', () => {
+      contestExpect('hello world').toContain('world')
+    })
+    contestIt('string missing substring fails', () => {
+      contestExpect('hello').toContain('bye')
+    })
+    contestIt('array contains element', () => {
+      contestExpect([1, 2, 3]).toContain(2)
+    })
+    contestIt('array missing element fails', () => {
+      contestExpect([1, 2, 3]).toContain(9)
+    })
+  })
+
+  const tests = getResults()[0].tests
+  vitestExpect(tests[0].passed).toBe(true)
+  vitestExpect(tests[1].passed).toBe(false)
+  vitestExpect(tests[2].passed).toBe(true)
+  vitestExpect(tests[3].passed).toBe(false)
+})
+
+test('expect.toHaveLength checks length', async () => {
+  await contestDescribe('toHaveLength', () => {
+    contestIt('array length passes', () => {
+      contestExpect([1, 2, 3]).toHaveLength(3)
+    })
+    contestIt('string length passes', () => {
+      contestExpect('abcd').toHaveLength(4)
+    })
+    contestIt('wrong length fails', () => {
+      contestExpect([1]).toHaveLength(2)
+    })
+  })
+
+  const tests = getResults()[0].tests
+  vitestExpect(tests[0].passed).toBe(true)
+  vitestExpect(tests[1].passed).toBe(true)
+  vitestExpect(tests[2].passed).toBe(false)
+})
+
+test('expect.toThrow asserts a function throws', async () => {
+  await contestDescribe('toThrow', () => {
+    contestIt('throwing function passes', () => {
+      contestExpect(() => {
+        throw new Error('boom')
+      }).toThrow()
+    })
+    contestIt('non-throwing function fails', () => {
+      contestExpect(() => 42).toThrow()
+    })
+    contestIt('message substring matches', () => {
+      contestExpect(() => {
+        throw new Error('network timeout')
+      }).toThrow('timeout')
+    })
+    contestIt('message regexp matches', () => {
+      contestExpect(() => {
+        throw new Error('code 503')
+      }).toThrow(/\d{3}/)
+    })
+    contestIt('wrong message fails', () => {
+      contestExpect(() => {
+        throw new Error('boom')
+      }).toThrow('fizzle')
+    })
+  })
+
+  const tests = getResults()[0].tests
+  vitestExpect(tests[0].passed).toBe(true)
+  vitestExpect(tests[1].passed).toBe(false)
+  vitestExpect(tests[2].passed).toBe(true)
+  vitestExpect(tests[3].passed).toBe(true)
+  vitestExpect(tests[4].passed).toBe(false)
+})
+
 test('setReporter streams each result as it is recorded', async () => {
   const seen: string[] = []
   setReporter((t) => seen.push(t.name))

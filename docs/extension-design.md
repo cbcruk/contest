@@ -1,22 +1,32 @@
-# Contest DevTools Extension Design
+# Contest Extension Design
 
-> Status: Draft (not implemented)
+> Status: Implemented (`packages/extension`)
+>
+> 이 문서는 이전의 "DevTools Sources 사이드바 + `inspectedWindow.eval`" 초안을
+> 대체한다. 그 방식은 puppeteer-over-CDP 부착이 상위호환하므로 폐기됐다.
+> (배경: [`direction.md`](./direction.md))
 
 ## Overview
 
-DevTools Sources 패널에 Sidebar를 추가하여 테스트 결과를 표시하는 방식.
-사용자는 기존 Snippets 에디터를 활용하고, extension은 결과 표시만 담당.
+Manifest V3 팝업 익스텐션. 버튼을 누르면 **현재 활성 탭**에 CDP로 부착해
+`@contest/core`의 `describe`/`it`/`expect` 테스트를 돌리고 결과를 팝업에 표시한다.
+
+핵심 가치: 새 브라우저를 띄우지 않고 **지금 로그인된 채 보고 있는 그 탭**에
+그대로 붙는다. 통상의 puppeteer/playwright가 빈 컨텍스트를 새로 여는 것과 반대.
 
 ## Structure
 
 ```
-extension/
-├── manifest.json
-├── devtools.html
-├── devtools.js
-└── sidebar/
-    ├── sidebar.html
-    └── sidebar.js
+packages/extension/
+├── public/
+│   ├── manifest.json     # MV3, debugger 권한, 팝업
+│   └── popup.html
+├── src/
+│   ├── popup.tsx         # Preact UI + 러너 구동
+│   ├── background.ts     # service worker (현재 최소)
+│   └── styles.css        # Tailwind
+├── stubs/                # 브라우저 번들용 Node 모듈 스텁 (ws, chromium-bidi, @puppeteer/browsers)
+└── vite.config.ts        # popup.js + background.js 빌드
 ```
 
 ## manifest.json
@@ -24,63 +34,79 @@ extension/
 ```json
 {
   "manifest_version": 3,
-  "name": "Contest",
-  "version": "0.1.0",
-  "description": "Browser-based test runner for DevTools",
-  "devtools_page": "devtools.html"
+  "name": "Contest Puppeteer",
+  "permissions": ["debugger", "activeTab", "scripting", "tabs"],
+  "host_permissions": ["<all_urls>"],
+  "action": { "default_popup": "popup.html" },
+  "background": { "service_worker": "background.js", "type": "module" }
 }
 ```
 
-## Core APIs
+`debugger` 권한이 CDP 부착의 핵심이다. puppeteer-core는 `ExtensionTransport`를
+통해 이 권한 위에서 동작한다.
 
-```js
-// devtools.js - Sidebar 생성
-chrome.devtools.panels.sources.createSidebarPane('Contest', (sidebar) => {
-  sidebar.setPage('sidebar/sidebar.html')
-})
+## Attach flow
 
-// sidebar.js - 페이지에서 코드 실행
-chrome.devtools.inspectedWindow.eval(code, (result, error) => {
-  // 결과 처리
-})
+```ts
+import { connect, ExtensionTransport } from 'puppeteer-core/.../puppeteer-core-browser.js'
+import { guardPage, type Page } from '@contest/e2e'
+
+const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+const transport = await ExtensionTransport.connectTab(tab.id!)
+const browser = await connect({ transport })
+const [rawPage] = await browser.pages()
+const page = guardPage(rawPage as unknown as Page) // read-only by default
 ```
 
-## User Flow
+## Runner
 
+팝업은 러너를 재구현하지 않는다. `@contest/core`의 `describe`/`it`를 그대로
+쓰고, 결과를 실시간 UI 로그로 흘리기 위해 `setReporter`를 구독한다.
+
+```ts
+import { describe, it, expect, setReporter, getResults } from '@contest/core'
+
+setReporter((test) => log(test.passed ? `✓ ${test.name}` : `✗ ${test.name}`))
+try {
+  await describe('Page', () => {
+    it('has a title', withPage(async (page) => {
+      expect(await page.title()).toBeTruthy()
+    }))
+  })
+} finally {
+  setReporter(null)
+}
 ```
-1. F12 → DevTools 열기
-2. Sources 탭 → 우측에 "Contest" sidebar 표시
-3. "Inject Contest" 클릭 → 페이지에 contest 프레임워크 주입
-4. Snippets에서 테스트 코드 작성
-5. Snippet 실행 (Cmd+Enter)
-6. "Run Tests" 클릭 → sidebar에 결과 표시
-```
+
+테스트는 **직렬** 실행된다 — 동일 탭에 동시 CDP 세션을 열 수 없기 때문이다.
+
+## Safety
+
+- **읽기전용이 기본.** `guardPage`가 `click`/`type`/`goto`/`close`를 막는다.
+  실 탭(어쩌면 프로덕션·로그인 상태)의 상태를 실수로 변형하지 않게 하기 위함.
+- 인터랙션은 `guardPage(page, { mutate: true })`로 명시적 opt-in, 그마저도
+  origin 허용목록(기본: 로컬 개발 호스트)을 통과해야 한다.
 
 ## UI Layout
 
 ```
-┌─────────────────────────────────────────────┐
-│ Sources                                      │
-├──────────────────────┬──────────────────────┤
-│ Snippets (기존)      │ Contest (sidebar)    │
-│                      │                      │
-│ describe('...', ()   │ [Inject] [Run] [Clear]│
-│   it('...', () =>    │                      │
-│     expect(...)      │ ✓ test 1             │
-│   })                 │ ✓ test 2             │
-│ })                   │ ✗ test 3             │
-│                      │   Error: ...         │
-└──────────────────────┴──────────────────────┘
+┌──────────────────────────────┐
+│ Contest E2E                  │
+│                              │
+│ Page Content                 │
+│  ● has a title               │
+│  ● has h1 element            │
+│  ● can extract text content  │
+│                              │
+│ [ Run Tests on Current Tab ] │
+│                              │
+│ [log] ✓ has a title ...      │
+└──────────────────────────────┘
 ```
 
-## Advantages
+## Open items
 
-- DevTools 기본 에디터(Snippets) 활용 → 별도 에디터 불필요
-- 현재 페이지 컨텍스트에서 실행 → DOM 접근 가능
-- 설치만 하면 어떤 사이트에서든 사용 가능
-
-## Implementation Notes
-
-- `chrome.devtools.inspectedWindow.eval()`로 contest 코드 주입
-- 결과는 `window.__contest__.getResults()`로 수집
-- Sidebar는 DevTools 테마(light/dark) 자동 적용
+- 팝업의 테스트는 현재 하드코딩된 데모다. 사용자 작성 테스트(에디터/파일 로드)를
+  받는 경로가 필요하다.
+- 팝업의 인라인 `withPage`와 `@contest/e2e`의 `withPage`를 하나로 합칠 것.
+- 번들 크기(현재 popup.js ~485KB, puppeteer-core 포함) 절감.

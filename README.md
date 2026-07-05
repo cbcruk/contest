@@ -20,11 +20,12 @@ Most browser-automation tools launch a new, empty browser. Contest instead
 attaches to the tab in front of you. See [`docs/direction.md`](docs/direction.md)
 for the reasoning and roadmap.
 
-> ⚠️ **Read-only by default is the goal.** Attaching to a live tab means
-> interactions (`click`, `type`, navigation) mutate real application state —
-> possibly against a production backend. Prefer observation
-> (`title`, `$eval`, computed style, visibility). Treat mutation as an explicit,
-> deliberate opt-in. See the roadmap in [`docs/direction.md`](docs/direction.md).
+> ⚠️ **Read-only by default.** Attaching to a live tab means interactions
+> (`click`, `type`, navigation, closing) mutate real application state —
+> possibly against a production backend. So `withPage` gives you a **read-only**
+> page: those methods throw unless you opt in with `{ mutate: true }`, and even
+> then only on allowlisted (local-dev) origins. Observation
+> (`title`, `$eval`, computed style, visibility) is always allowed.
 
 ## Packages
 
@@ -33,7 +34,6 @@ for the reasoning and roadmap.
 | `@contest/core`     | Test framework — `describe`, `it`, `expect`, results    |
 | `@contest/e2e`      | Attach to a live tab (`connect`, `withPage`) over CDP   |
 | `@contest/extension`| Chrome extension: run tests against the current tab     |
-| `@contest/sandbox`  | ⚠️ Legacy — unsandboxed `execute`, slated for removal    |
 
 ## Usage
 
@@ -71,15 +71,17 @@ import { describe, it, expect } from '@contest/core'
 import { withPage } from '@contest/e2e'
 
 await describe('Page', () => {
+  // Read-only: observe the live tab.
   it('has a title', withPage(async (page) => {
     const title = await page.title()
     expect(title).toBeTruthy()
   }))
 
-  it('renders an h1', withPage(async (page) => {
-    const h1 = await page.$('h1')
-    expect(h1).toBeTruthy()
-  }))
+  // Opt into interaction — allowed only on local-dev origins by default.
+  it('submits the form', withPage(async (page) => {
+    await page.type('#email', 'a@b.co')
+    await page.click('#submit')
+  }, { mutate: true }))
 })
 ```
 
@@ -118,6 +120,10 @@ Creates assertions:
 - `.toEqual(expected)` — deep equality (JSON comparison)
 - `.toBeTruthy()` / `.toBeFalsy()`
 - `.toBeNull()` / `.toBeUndefined()`
+- `.toContain(item)` — substring (strings) or element (arrays)
+- `.toHaveLength(n)` — numeric `length` check
+- `.toThrow(expected?)` — asserts a function throws; optional message
+  substring / RegExp
 
 #### `getResults()` / `clearResults()`
 
@@ -136,15 +142,28 @@ Connects to a browser over CDP and returns a puppeteer `Browser`.
 #### `withPage(fn, options?)`
 
 Wraps an async test body so it receives a `Page` attached to the active tab.
-Use inside `it()`.
+Use inside `it()`. The page is **read-only** unless `options.mutate` is true.
+
+Options:
+
+- `url?` / `newTab?` — navigate to a URL, optionally in a new tab
+- `mutate?: boolean` — enable `click` / `type` / `goto` / `close` (default `false`)
+- `allowMutationOn?: (string | RegExp)[]` — origins where mutation is permitted
+  (default: local-dev hosts only)
+
+#### `guardPage(page, options?)`
+
+Wraps a `Page` to enforce the read-only/mutation policy directly. `withPage`
+uses it internally.
 
 ## TODO
 
-- [ ] Read-only default + explicit mutation opt-in with a production-origin guard
-- [ ] More matchers (`toThrow`, `toContain`, `toHaveLength`, etc.)
+- [x] Read-only default + explicit mutation opt-in with an origin guard
+- [x] Reconcile `docs/extension-design.md` with the shipped popup design
+- [x] Remove `@contest/sandbox`
+- [x] More matchers (`toThrow`, `toContain`, `toHaveLength`)
 - [ ] Nested `describe` blocks
 - [ ] `it.skip` / `it.only`
-- [ ] Reconcile or remove `docs/extension-design.md` (describes a different,
-      superseded DevTools-sidebar design)
-- [ ] Remove `@contest/sandbox` once nothing depends on it
+- [ ] Unify the popup's inline `withPage` with `@contest/e2e`
+- [ ] User-authored tests in the popup (editor / file load)
 - [ ] Test file auto-discovery, watch mode, custom reporters

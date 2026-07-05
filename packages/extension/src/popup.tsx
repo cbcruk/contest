@@ -15,8 +15,7 @@ import {
   clearResults,
   setReporter,
 } from '@contest/core'
-
-type Page = Awaited<ReturnType<Awaited<ReturnType<typeof connect>>['pages']>>[0]
+import { guardPage, type Page } from '@contest/e2e'
 
 function withPage(fn: (page: Page) => Promise<void>): () => Promise<void> {
   return async (): Promise<void> => {
@@ -29,7 +28,10 @@ function withPage(fn: (page: Page) => Promise<void>): () => Promise<void> {
 
     const transport = await ExtensionTransport.connectTab(tab.id)
     const browser = await connect({ transport })
-    const [page] = await browser.pages()
+    const [rawPage] = await browser.pages()
+    // Read-only by default: interactions against the live tab throw unless a
+    // test opts in via guardPage(..., { mutate: true }) on an allowed origin.
+    const page = guardPage(rawPage as unknown as Page)
 
     try {
       await fn(page)
