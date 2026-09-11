@@ -1,9 +1,10 @@
 {
-  "name": "contest-monorepo",
+  "name": "poke-monorepo",
   "private": true,
   "scripts": {
     "build": "pnpm -r build",
     "test": "pnpm -r test"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "description": "Poke at the app you're developing. A code buffer beside a live page."
 }

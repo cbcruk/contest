@@ -1,201 +1,52 @@
-# contest
+# poke
 
-Assert against the browser tab you're **already looking at** — no fresh browser
-launch, no Node + jsdom.
+개발 중인 내 앱을 코드로 찔러본다. 라이브 페이지 옆에 코드 버퍼 하나.
 
-Contest is a Chrome extension that attaches to your current, live tab over the
-Chrome DevTools Protocol (via `puppeteer-core`) and runs `describe`/`it`/`expect`
-tests against it — with your real session, cookies, and page state intact.
+DevTools의 Sources > Snippets를 쓰다 보면 두 군데서 막힌다. poke는 그 두 개만 채운다.
 
-## Why?
+- **신뢰된 입력** — `click`/`type`이 `webContents.sendInputEvent`로 내려가
+  `event.isTrusted === true`인 이벤트를 만든다. 스니펫의 `el.click()`은 거짓이다.
+- **내비게이션 생존** — 버퍼가 메인 프로세스에서 돌기 때문에 페이지가 넘어가도
+  코드가 이어진다. 스니펫은 페이지 컨텍스트와 함께 사라진다.
 
-Frontend tests should run where frontend code runs — in real browsers, against
-the real page:
+Playwright를 대체하지 않는다. **테스트를 쓰기 전 단계**의 도구다. Playwright는 실행마다
+새 컨텍스트를 열지만, poke는 앱이 켜져 있는 동안 로그인된 채 그 화면 그대로 남는다.
+버퍼에서 `goto`를 빼면 지금 보고 있는 화면에 코드가 그대로 붙는다.
 
-- Real DOM APIs, not jsdom approximations
-- Actual browser behavior (layout, events, timing)
-- The **live** page as it actually is (logged in, mid-flow), not a fresh context
+대상은 localhost와 개발 서버의 내 앱이다. 타사이트 자동화는 범위 밖이다.
 
-Most browser-automation tools launch a new, empty browser. Contest instead
-attaches to the tab in front of you. See [`docs/direction.md`](docs/direction.md)
-for the reasoning and roadmap.
-
-> ⚠️ **Read-only by default.** Attaching to a live tab means interactions
-> (`click`, `type`, navigation, closing) mutate real application state —
-> possibly against a production backend. So `withPage` gives you a **read-only**
-> page: those methods throw unless you opt in with `{ mutate: true }`, and even
-> then only on allowlisted (local-dev) origins. Observation
-> (`title`, `$eval`, computed style, visibility) is always allowed.
-
-## Packages
-
-| Package             | Description                                              |
-| ------------------- | ------------------------------------------------------- |
-| `@contest/core`     | Test framework — `describe`, `it`, `expect`, results    |
-| `@contest/e2e`      | Attach to a live tab (`connect`, `withPage`) over CDP   |
-| `@contest/extension`| Chrome extension: run tests against the current tab     |
-
-## Usage
-
-### Writing tests
-
-`@contest/core` is the single runner. Tests run **serially** in registration
-order (an attach session can't run concurrently against one tab), so always
-`await` a suite before reading its results.
-
-```typescript
-import { describe, it, expect, getResults, clearResults } from '@contest/core'
-
-clearResults()
-
-await describe('Calculator', () => {
-  it('adds numbers', () => {
-    expect(1 + 2).toBe(3)
-  })
-
-  it('compares objects', () => {
-    expect({ a: 1 }).toEqual({ a: 1 })
-  })
-})
-
-console.log(getResults())
-// [{ name: 'Calculator', tests: [{ name: 'adds numbers', passed: true }, ...] }]
+```sh
+pnpm install
+pnpm --filter poke start
 ```
 
-### Attaching to the live tab
+자세한 사용법은 [`packages/poke/README.md`](packages/poke/README.md)에 있다.
 
-`@contest/e2e` gives each test a `Page` bound to your current tab over CDP:
+## 어쩌다 여기까지 왔는가
 
-```typescript
-import { describe, it, expect } from '@contest/core'
-import { withPage } from '@contest/e2e'
+이 저장소는 `contest`라는 이름으로 "브라우저 런타임에서 e2e 테스트를 실행한다"에서
+시작했다. 실제 동기는 개발하면서 내 앱을 가볍게 찔러보는 것이었고, 그 간극이
+오래 남았다. 세 가지를 확인하고 나서 방향을 정리했다.
 
-await describe('Page', () => {
-  // Read-only: observe the live tab.
-  it('has a title', withPage(async (page) => {
-    const title = await page.title()
-    expect(title).toBeTruthy()
-  }))
+1. **MV3는 확장 페이지에서 `eval`을 막는다.** 그래서 아래 `packages/extension`의
+   "사용자 작성 테스트" 기능은 실제로 동작한 적이 없다. Run을 누르면 CSP 오류가 난다.
+2. **Chrome 136은 기본 프로필의 원격 디버깅을 막았다.** `/json/version`이 빈 응답이다.
+   즉 이미 열려 있는 내 크롬에 붙는 길은 확장뿐이고, 그 문은 닫히는 방향이다.
+3. **Electron에서는 이 제약이 전부 사라진다.** 메인 프로세스는 그냥 Node다.
+   대신 내 크롬의 로그인 세션은 따라오지 않는데, 대상이 내 개발 서버라면 비용이 아니다.
 
-  // Opt into interaction — allowed only on local-dev origins by default.
-  it('submits the form', withPage(async (page) => {
-    await page.type('#email', 'a@b.co')
-    await page.click('#submit')
-  }, { mutate: true }))
-})
-```
+과정은 [`docs/direction.md`](docs/direction.md)에 남아 있다.
 
-### Streaming results to a UI
+## 이전 패키지
 
-Register a reporter to receive each result as it is recorded (used by the
-extension popup):
+`packages/contest`, `packages/e2e`, `packages/extension`은 확장 기반의 이전 구현이다.
+아직 정리하지 않았고 poke는 이들에 의존하지 않는다. 참고할 때 두 가지를 유의할 것.
 
-```typescript
-import { setReporter, describe, it } from '@contest/core'
+- 확장의 사용자 작성 테스트는 MV3 CSP 때문에 동작하지 않는다.
+- `@contest/core`의 `toEqual`은 JSON 문자열 비교라 키 순서, `undefined` 속성,
+  `NaN`, `Date`, `Map`에서 오답이 나온다. poke는 재귀 비교로 다시 썼다
+  (`packages/poke/src/main/expect.ts`).
 
-setReporter((test) => {
-  console.log(test.passed ? '✓' : '✗', test.name)
-})
-```
+## 라이선스
 
-## API
-
-### @contest/core
-
-#### `describe(name, fn): Promise<void>`
-
-Defines a test suite. Always `await` it — tests run serially and results are
-only complete once the returned promise resolves.
-
-#### `it(name, fn)`
-
-Defines a test case. Must be called synchronously inside a `describe()` callback;
-throws otherwise. `fn` may be sync or async.
-
-- `it.skip(name, fn)` — record the test as skipped without running it.
-- `it.only(name, fn)` — run only `.only` tests within that top-level suite.
-
-`describe` blocks may be nested; nested suites are reported as `Parent > Child`.
-
-#### `beforeEach(fn)` / `afterEach(fn)` / `beforeAll(fn)` / `afterAll(fn)`
-
-Register setup/teardown for the current suite and its nested suites. Must be
-called inside a `describe()`.
-
-- `beforeEach` / `afterEach` run around **each** test. `beforeEach` runs
-  outermost→innermost, `afterEach` the reverse; `afterEach` runs even if the
-  test (or a `beforeEach`) throws.
-- `beforeAll` / `afterAll` run **once** for the suite (only if it has a test
-  that will run). A failing `beforeAll` fails every test in the block but
-  `afterAll` still runs; a failing `afterAll` surfaces as a synthetic result.
-
-```typescript
-await describe('Cart', () => {
-  let cart
-  beforeEach(() => { cart = new Cart() })
-  afterEach(() => { cart.dispose() })
-
-  it('starts empty', () => {
-    expect(cart.items).toHaveLength(0)
-  })
-})
-```
-
-#### `expect(value)`
-
-Creates assertions:
-
-- `.toBe(expected)` — strict equality (`===`)
-- `.toEqual(expected)` — deep equality (JSON comparison)
-- `.toBeTruthy()` / `.toBeFalsy()`
-- `.toBeNull()` / `.toBeUndefined()`
-- `.toContain(item)` — substring (strings) or element (arrays)
-- `.toHaveLength(n)` — numeric `length` check
-- `.toThrow(expected?)` — asserts a function throws; optional message
-  substring / RegExp
-
-#### `getResults()` / `clearResults()`
-
-Read all collected `SuiteResult[]`, or reset before a new run.
-
-#### `setReporter(fn | null)`
-
-Subscribe to per-test results as they are recorded; pass `null` to unsubscribe.
-
-### @contest/e2e
-
-#### `connect(options?)`
-
-Connects to a browser over CDP and returns a puppeteer `Browser`.
-
-#### `withPage(fn, options?)`
-
-Wraps an async test body so it receives a `Page` attached to the active tab.
-Use inside `it()`. The page is **read-only** unless `options.mutate` is true.
-
-Options:
-
-- `url?` / `newTab?` — navigate to a URL, optionally in a new tab
-- `mutate?: boolean` — enable `click` / `type` / `goto` / `close` (default `false`)
-- `allowMutationOn?: (string | RegExp)[]` — origins where mutation is permitted
-  (default: local-dev hosts only)
-
-#### `guardPage(page, options?)`
-
-Wraps a `Page` to enforce the read-only/mutation policy directly. `withPage`
-uses it internally.
-
-## TODO
-
-- [x] Read-only default + explicit mutation opt-in with an origin guard
-- [x] Reconcile `docs/extension-design.md` with the shipped popup design
-- [x] Remove `@contest/sandbox`
-- [x] More matchers (`toThrow`, `toContain`, `toHaveLength`)
-- [x] Nested `describe` blocks
-- [x] `it.skip` / `it.only`
-- [x] Unify the popup's inline `withPage` with `@contest/e2e`
-- [x] User-authored tests in the popup (editable, persisted via `chrome.storage`)
-- [x] `beforeEach` / `afterEach` hooks
-- [x] `beforeAll` / `afterAll` hooks
-- [ ] Bundle-size reduction (popup bundles puppeteer-core)
-- [ ] Test file auto-discovery, watch mode, custom reporters
+MIT

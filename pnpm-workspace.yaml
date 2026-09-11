@@ -1,2 +1,7 @@
 packages:
   - 'packages/*'
+
+# electron's postinstall downloads the binary; pnpm 11 needs this approval.
+allowBuilds:
+  electron: true
+  esbuild: true
