@@ -205,6 +205,33 @@ await runCode(`await reload()`)
 v = (await browser.pages()).find((p) => !p.url().includes('index.html'))
 check('reload 는 실제로 다시 불러옴', await v.evaluate(() => window.__survives ?? '(날아감)').catch(() => '(파괴됨)'), '(날아감)')
 
+// ---- 2e. 텍스트로 찾기 (testing-library 의 getNodeText 방식) ----
+const logText = await runCode(`
+await goto('${site}/rooms.html')
+log('찾기:', await text(/3진료실/))
+log('개수:', String(await count(/3진료실/)))
+log('줄바꿈 정규화:', await text(/여러 줄에 걸친/))
+log('없는 것:', String(await count(/없는텍스트/)))
+await click(/저장/)
+log('클릭 결과:', await title())
+`)
+check('텍스트로 요소 찾기', /찾기: 3진료실/.test(logText), true)
+// 직계 텍스트 노드만 세므로 감싸는 div, body 까지 걸리지 않는다
+check('조상은 걸리지 않음', /개수: 1/.test(logText), true)
+check('줄바꿈 공백 정규화', /줄바꿈 정규화: 여러 줄에 걸친 텍스트/.test(logText), true)
+check('없는 텍스트는 0', /없는 것: 0/.test(logText), true)
+check('텍스트로 클릭', /클릭 결과: SAVED/.test(logText), true)
+
+const logDup = await runCode(`await goto('${site}/rooms.html')\nawait text(/중복/)`)
+check('중복 매치는 무엇이 걸렸는지 말함', /2 elements matched: p "중복", p "중복"/.test(logDup), true)
+
+const logNoText = await runCode(`await text(/없는텍스트/, 400)`)
+check('없는 텍스트는 이유를 말하며 실패', /text\(\/없는텍스트\/\): no element matched/.test(logNoText), true)
+
+// 페이지 안에서 던진 오류는 Electron 이 메시지를 삼킨다. Node 쪽에서 다시 던져야 한다.
+const logEvalErr = await runCode(`await evaluate('nope.nope')`)
+check('evaluate 오류 메시지 보존', /evaluate: nope is not defined/.test(logEvalErr), true)
+
 // ---- 3. 버퍼 전환 ----
 const a = await panel.evaluate(() => window.poke.createBuffer('alpha'))
 await panel.evaluate((id) => window.__pokeTest.openBuffer(id), a.id)
