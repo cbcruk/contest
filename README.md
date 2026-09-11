@@ -28,7 +28,8 @@ Ctrl+Enter 또는 Run 버튼으로 버퍼를 실행한다.
 
 | | |
 | --- | --- |
-| `goto(url)` | 이동 |
+| `goto(url)` | 이동 (이미 그 주소면 그대로 둔다) |
+| `reload()` | 실제로 다시 불러오기 |
 | `click(sel)` / `type(sel, text)` / `press(key)` | 신뢰된 입력 |
 | `waitFor(sel, ms)` / `waitForNavigation(ms)` | 대기 |
 | `text(sel)` / `attr(sel, name)` | 읽기 (요소를 기다린다) |
@@ -38,6 +39,10 @@ Ctrl+Enter 또는 Run 버튼으로 버퍼를 실행한다.
 | `sleep(ms)` / `log(...)` | 보조 |
 
 `require`도 주입되어 있다. 메인 프로세스라 Node 전체가 열려 있고 MV3 CSP가 없다.
+
+`goto`는 이미 그 주소에 있으면 아무것도 하지 않는다. `goto`로 시작하는 버퍼를 수십 번
+돌리는 게 기본 사용 방식인데, 매번 페이지를 새로 띄우면 이 도구의 존재 이유가 사라진다.
+진짜로 다시 불러오려면 `reload()`를 부른다.
 
 `click`, `type`, `text`, `attr`은 요소가 나타날 때까지 기다렸다가(기본 5초) 없으면
 이유를 말하며 실패한다. 클라이언트에서 그리는 앱은 로딩이 끝난 뒤에 DOM이 생기므로

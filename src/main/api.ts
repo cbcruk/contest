@@ -102,11 +102,36 @@ export function createApi(getWc: () => WebContents, emit: Emit) {
     })
   }
 
+  /** Same address, ignoring differences the browser itself normalises away. */
+  function sameUrl(a: string, b: string): boolean {
+    try {
+      return new URL(a).href === new URL(b).href
+    } catch {
+      return a === b
+    }
+  }
+
+  /**
+   * Navigating away is the one thing this tool is supposed not to do on its
+   * own. A buffer that opens with goto() gets run dozens of times, and every
+   * run after the first would otherwise throw the page state away. So going
+   * to where you already are does nothing; ask for reload() when you mean it.
+   */
   async function goto(target: string): Promise<void> {
+    if (sameUrl(wc().getURL(), target)) {
+      emit({ kind: 'dim', message: `  · goto: already at ${target}` })
+      return
+    }
     markAction()
     await wc().loadURL(target)
     actionSeq = navSeq
     await sleep(80)
+  }
+
+  async function reload(): Promise<void> {
+    markAction()
+    wc().reload()
+    await waitForNavigation()
   }
 
   const log = (...args: unknown[]): void =>
@@ -117,6 +142,7 @@ export function createApi(getWc: () => WebContents, emit: Emit) {
 
   const api = {
     goto,
+    reload,
     click,
     type,
     press,
