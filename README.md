@@ -33,12 +33,16 @@ Ctrl+Enter 또는 Run 버튼으로 버퍼를 실행한다.
 | `waitFor(sel, ms)` / `waitForNavigation(ms)` | 대기 |
 | `text(sel)` / `texts(sel)` / `count(sel)` / `attr(sel, name)` | 읽기 |
 | `url()` / `title()` / `evaluate(code)` | 페이지 상태 |
-| `expect(v)` | `toBe` `toEqual` `toContain` `toHaveLength` `toBeTruthy` `toBeFalsy` `toBeNull` `toThrow` |
+| `expect(v)` | vitest 매처 전체 (`toEqual` `toStrictEqual` `toMatchObject` `toContain` `toHaveProperty` `toBeCloseTo` …) |
 | `sleep(ms)` / `log(...)` | 보조 |
 
 `require`도 주입되어 있다. 메인 프로세스라 Node 전체가 열려 있고 MV3 CSP가 없다.
 
-`describe`와 `it`은 없다. 단언은 로그에 한 줄씩 체크 표시로만 남는다.
+단언은 `@vitest/expect`를 러너 없이 세워서 쓴다. `expect.any`, `expect.arrayContaining`
+같은 비대칭 매처도 그대로 된다. 실패하면 diff가 로그에 붙는다.
+
+`describe`와 `it`은 없다. 매처 호출마다 로그에 체크 표시가 한 줄씩 남고,
+실패한 지점에서 실행이 멈춘다.
 
 ## 버퍼
 
@@ -69,6 +73,8 @@ test/          smoke.mjs
 
 `runner.ts`는 `new AsyncFunction`이 본문을 감싸며 밀리는 줄 번호를 보정한다.
 오프셋은 현재 V8에서 2지만 하드코딩하지 않고 기동 시 1회 측정한다.
+
+`expect.ts`는 vitest 매처를 Proxy로 감싸 호출마다 로그를 남긴다.
 
 ## 어쩌다 여기까지 왔는가
 
