@@ -1,133 +1,92 @@
+import {
+  chai,
+  JestAsymmetricMatchers,
+  JestChaiExpect,
+  JestExtend,
+  setState,
+} from '@vitest/expect'
+import { diff } from '@vitest/utils/diff'
+import { format, plugins } from '@vitest/pretty-format'
+import type { ExpectStatic } from '@vitest/expect'
 import type { LogLine } from '../shared/types'
 
-/**
- * Recursive structural equality. contest compared JSON strings, which gets
- * key order, `undefined` properties, NaN, Date, Map and Set all wrong.
- */
-export function deepEqual(a: unknown, b: unknown, seen = new WeakMap<object, object>()): boolean {
-  if (Object.is(a, b)) return true
-  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false
+// Vitest's matchers run fine without a runner: three chai plugins and one
+// setState call. Hand-rolling this was how the old JSON-comparing toEqual got
+// Set members, sparse arrays, key order and undefined properties wrong.
+chai.use(JestExtend)
+chai.use(JestChaiExpect)
+chai.use(JestAsymmetricMatchers)
 
-  // Cycles: if we're already comparing this pair, assume equal and let the
-  // rest of the structure decide.
-  const prior = seen.get(a)
-  if (prior === b) return true
-  seen.set(a, b)
+const chaiExpect = chai.expect as unknown as ExpectStatic
 
-  if (Object.getPrototypeOf(a) !== Object.getPrototypeOf(b)) return false
-  if (a instanceof Date) return a.getTime() === (b as Date).getTime()
-  if (a instanceof RegExp) return a.source === (b as RegExp).source && a.flags === (b as RegExp).flags
+// The state is keyed on the expect function itself. Passing the exported
+// GLOBAL_EXPECT symbol throws, since the store is a WeakMap.
+setState({ assertionCalls: 0, isExpectingAssertions: false, soft: false }, chaiExpect)
 
-  if (a instanceof Map) {
-    const bm = b as Map<unknown, unknown>
-    if (a.size !== bm.size) return false
-    for (const [k, v] of a) {
-      if (!bm.has(k) || !deepEqual(v, bm.get(k), seen)) return false
-    }
-    return true
-  }
+/** Asymmetric matchers hang off `expect` and must survive the wrapper. */
+const ASYMMETRIC = [
+  'any',
+  'anything',
+  'arrayContaining',
+  'objectContaining',
+  'stringContaining',
+  'stringMatching',
+  'closeTo',
+  'not',
+] as const
 
-  if (a instanceof Set) {
-    const bs = b as Set<unknown>
-    if (a.size !== bs.size) return false
-    for (const v of a) if (!bs.has(v)) return false
-    return true
-  }
+/** tinyrainbow colours the diff regardless of options; the log panel is HTML. */
+// eslint-disable-next-line no-control-regex
+const ANSI = /\[[0-9;]*m/g
+const stripAnsi = (s: string): string => s.replace(ANSI, '')
 
-  if (Array.isArray(a)) {
-    const ba = b as unknown[]
-    if (a.length !== ba.length) return false
-    return a.every((v, i) => deepEqual(v, ba[i], seen))
-  }
-
-  // Plain objects: compare own keys, `undefined` values included.
-  const ka = Reflect.ownKeys(a)
-  const kb = Reflect.ownKeys(b)
-  if (ka.length !== kb.length) return false
-  return ka.every(
-    (k) =>
-      Object.prototype.hasOwnProperty.call(b, k) &&
-      deepEqual((a as Record<PropertyKey, unknown>)[k], (b as Record<PropertyKey, unknown>)[k], seen)
-  )
-}
-
-const show = (v: unknown): string => {
-  if (typeof v === 'string') return JSON.stringify(v)
-  if (typeof v === 'bigint') return `${v}n`
-  if (v instanceof Date) return v.toISOString()
-  if (v instanceof Map) return `Map(${v.size})`
-  if (v instanceof Set) return `Set(${v.size})`
-  if (typeof v === 'object' && v !== null) {
-    try { return JSON.stringify(v) } catch { return String(v) }
-  }
-  return String(v)
-}
+const label = (v: unknown): string =>
+  format(v, { plugins: Object.values(plugins), printBasicPrototype: false, min: true })
 
 type Emit = (line: LogLine) => void
 
+interface ChaiError extends Error {
+  actual?: unknown
+  expected?: unknown
+  showDiff?: boolean
+}
+
 /**
- * Assertions for a buffer. There is no describe/it: each check just prints a
- * line and throws on failure, which stops the run at that point.
+ * Builds the `expect` injected into a buffer. There is no describe/it: every
+ * matcher call prints a line, and a failure prints a diff and stops the run.
  */
-export function expect(actual: unknown, emit: Emit) {
-  const pass = (what: string): void => emit({ kind: 'ok', message: `  ✓ ${what}` })
-  const fail = (what: string, detail: string): never => {
-    emit({ kind: 'error', message: `  ✗ ${what}` })
-    throw new Error(detail)
+export function createExpect(emit: Emit) {
+  const wrapped = (actual: unknown): unknown =>
+    new Proxy(chaiExpect(actual), {
+      get(target, prop, receiver) {
+        const value = Reflect.get(target, prop, receiver)
+        if (typeof value !== 'function' || typeof prop !== 'string') return value
+
+        return (...args: unknown[]): unknown => {
+          const name = `${prop}${args.length ? ` ${args.map(label).join(', ')}` : ''}`
+          try {
+            const out = (value as (...a: unknown[]) => unknown).apply(target, args)
+            emit({ kind: 'ok', message: `  ✓ ${name}` })
+            return out
+          } catch (err) {
+            emit({ kind: 'error', message: `  ✗ ${name}` })
+            const e = err as ChaiError
+            if (e.showDiff) {
+              const text = diff(e.expected, e.actual)
+              if (text) emit({ kind: 'dim', message: stripAnsi(text) })
+            }
+            throw err
+          }
+        }
+      },
+    })
+
+  for (const key of ASYMMETRIC) {
+    Object.defineProperty(wrapped, key, {
+      value: (chaiExpect as unknown as Record<string, unknown>)[key],
+      enumerable: true,
+    })
   }
 
-  return {
-    toBe(other: unknown): void {
-      if (Object.is(actual, other)) return pass(`toBe ${show(other)}`)
-      fail(`toBe ${show(other)}`, `expected ${show(other)}, got ${show(actual)}`)
-    },
-    toEqual(other: unknown): void {
-      if (deepEqual(actual, other)) return pass(`toEqual ${show(other)}`)
-      fail(`toEqual ${show(other)}`, `expected ${show(other)}, got ${show(actual)}`)
-    },
-    toContain(item: unknown): void {
-      const what = `toContain ${show(item)}`
-      if (typeof actual === 'string') {
-        if (actual.includes(String(item))) return pass(what)
-        return fail(what, `${show(actual)} does not contain ${show(item)}`)
-      }
-      if (Array.isArray(actual)) {
-        if (actual.some((v) => deepEqual(v, item))) return pass(what)
-        return fail(what, `${show(actual)} does not contain ${show(item)}`)
-      }
-      return fail(what, 'toContain expects a string or array')
-    },
-    toHaveLength(n: number): void {
-      const len = (actual as { length?: unknown } | null | undefined)?.length
-      const what = `toHaveLength ${n}`
-      if (typeof len !== 'number') return fail(what, 'value has no numeric length')
-      if (len === n) return pass(what)
-      return fail(what, `expected length ${n}, got ${len}`)
-    },
-    toBeTruthy(): void {
-      if (actual) return pass('toBeTruthy')
-      fail('toBeTruthy', `expected truthy, got ${show(actual)}`)
-    },
-    toBeFalsy(): void {
-      if (!actual) return pass('toBeFalsy')
-      fail('toBeFalsy', `expected falsy, got ${show(actual)}`)
-    },
-    toBeNull(): void {
-      if (actual === null) return pass('toBeNull')
-      fail('toBeNull', `expected null, got ${show(actual)}`)
-    },
-    toThrow(expected?: string | RegExp): void {
-      const what = expected === undefined ? 'toThrow' : `toThrow ${show(expected)}`
-      if (typeof actual !== 'function') return fail(what, 'toThrow expects a function')
-      let thrown: unknown
-      let threw = false
-      try { (actual as () => unknown)() } catch (e) { threw = true; thrown = e }
-      if (!threw) return fail(what, 'function did not throw')
-      if (expected === undefined) return pass(what)
-      const message = thrown instanceof Error ? thrown.message : String(thrown)
-      const ok = typeof expected === 'string' ? message.includes(expected) : expected.test(message)
-      if (ok) return pass(what)
-      return fail(what, `expected error matching ${show(expected)}, got ${show(message)}`)
-    },
-  }
+  return wrapped
 }

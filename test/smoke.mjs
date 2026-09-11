@@ -99,6 +99,32 @@ check('실행 성공 보고', /done \(/.test(log1), true)
 const lines1 = log1.split('\n').map((l) => l.trim()).filter(Boolean)
 check('done 이 로그의 마지막 줄', /^done \(/.test(lines1[lines1.length - 1] ?? ''), true)
 
+// ---- 1b. 손수 짠 deepEqual 이 틀렸던 것들 + vitest 가 주는 것 ----
+const logEq = await runCode(`
+expect(new Set([{ x: 1 }])).toEqual(new Set([{ x: 1 }]))
+expect({ b: 2, a: 1 }).toEqual({ a: 1, b: 2 })
+expect({ a: 1, b: { c: 2, d: 3 } }).toMatchObject({ b: { c: 2 } })
+expect([1, 2, 3]).toEqual(expect.arrayContaining([3, 2]))
+expect({ id: 7 }).toEqual({ id: expect.any(Number) })
+expect(0.1 + 0.2).toBeCloseTo(0.3)
+`)
+check('Set 객체원소 동등성', /✓ toEqual Set \{\{"x": 1\}\}/.test(logEq), true)
+check('키 순서 무관', /✓ toEqual \{"a": 1, "b": 2\}/.test(logEq), true)
+check('toMatchObject', /✓ toMatchObject/.test(logEq), true)
+check('arrayContaining', /✓ toEqual ArrayContaining/.test(logEq), true)
+check('expect.any', /✓ toEqual \{"id": Any<Number>\}/.test(logEq), true)
+check('toBeCloseTo', /✓ toBeCloseTo/.test(logEq), true)
+check('동등성 전부 통과', /done \(/.test(logEq), true)
+
+// 희소 배열은 명시적 undefined 와 달라야 한다 (예전 구현은 같다고 했다)
+const logSparse = await runCode(`expect([1, , 3]).toStrictEqual([1, undefined, 3])`)
+check('희소배열 구분', /✗ toStrictEqual/.test(logSparse), true)
+
+// 실패하면 diff 가 붙는다
+const logDiff = await runCode(`expect({ a: 1, b: 2 }).toEqual({ a: 1, b: 3 })`)
+check('실패 시 diff 출력', /- Expected[\s\S]*\+ Received[\s\S]*"b"/.test(logDiff), true)
+check('diff 에 ANSI 없음', /\u001B\[/.test(logDiff), false)
+
 // ---- 2. 에러 줄 번호 ----
 // throw 는 아래 배열의 4번째 줄에 있다.
 const errCode = ['const a = 1', 'const b = 2', '', "throw new Error('boom')"].join('\n')

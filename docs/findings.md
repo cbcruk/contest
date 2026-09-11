@@ -77,3 +77,19 @@ HTTP 서버 없이 페이지에 모듈을 주입할 수 있다. 페이지에서
 
 API 함수 안에서 던진 오류도 스택의 첫 `<anonymous>` 프레임이 그 API를 호출한
 사용자 줄을 가리킨다. `src/main/runner.ts`가 이걸 쓴다.
+
+## 6. @vitest/expect 를 러너 없이 쓰기
+
+매처만 빌려 쓰는 건 된다. chai 플러그인 셋과 `setState` 한 번이면 끝이고,
+`toMatchObject`·`arrayContaining`·`expect.any`·`toBeCloseTo` 같은 것들이 전부 동작한다.
+문서에 없는 함정이 두 개 있다.
+
+- **`setState`의 두 번째 인자는 expect 함수 자체여야 한다.** 같이 export되는
+  `GLOBAL_EXPECT`를 넘기면 심볼이라 `Invalid value used as weak map key`로 터진다.
+- **`diff()`의 `noColor: true`가 듣지 않는다.** tinyrainbow가 환경을 보고 결정해서
+  ANSI가 그대로 남는다. HTML에 넣으려면 직접 걷어내야 한다.
+
+손수 짠 deepEqual과 22개 케이스로 비교했을 때 직접 구현 쪽 오답이 두 개였다.
+`Set`의 객체 원소를 `has()`로 찾아 참조 비교가 되던 것과, 희소 배열 `[1,,3]`을
+`[1,undefined,3]`과 같다고 본 것. `node:util`의 `isDeepStrictEqual`은 22개를
+모두 맞히므로, 매처가 필요 없고 동등성만 필요하면 그쪽이 의존성 없는 답이다.

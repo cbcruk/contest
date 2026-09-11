@@ -1,5 +1,5 @@
 import type { WebContents } from 'electron'
-import { expect } from './expect'
+import { createExpect } from './expect'
 import type { LogLine } from '../shared/types'
 
 export type Emit = (line: LogLine) => void
@@ -119,7 +119,7 @@ export function createApi(getWc: () => WebContents, emit: Emit) {
       js<T>(typeof expr === 'function' ? `(${expr})()` : expr),
     sleep,
     log,
-    expect: (actual: unknown) => expect(actual, emit),
+    expect: createExpect(emit),
   }
 
   return { api, onDidFinishLoad }
