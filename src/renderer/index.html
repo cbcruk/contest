@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <title>poke</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div id="panel">
+      <header>
+        <span id="brand">POKE</span>
+        <span id="tabs"></span>
+        <button id="add" title="새 버퍼">+</button>
+      </header>
+      <input id="url" placeholder="http://localhost:3000  (Enter 로 이동)" spellcheck="false" />
+      <div id="editor"></div>
+      <button id="run">Run <span class="hint">Ctrl+Enter</span></button>
+      <div id="log"></div>
+    </div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
