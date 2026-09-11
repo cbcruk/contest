@@ -1,5 +1,6 @@
 import type { WebContents } from 'electron'
 import { createExpect } from './expect'
+import { describeMatches, describeTarget, findAll, findOne, type Target } from './find'
 import type { LogLine } from '../shared/types'
 
 export type Emit = (line: LogLine) => void
@@ -23,9 +24,9 @@ export function createApi(getWc: () => WebContents, emit: Emit) {
   const markAction = (): void => { actionSeq = navSeq }
   const onDidFinishLoad = (): void => { navSeq += 1 }
 
-  async function boxOf(selector: string): Promise<{ x: number; y: number } | null> {
+  async function boxOf(target: Target, method: string): Promise<{ x: number; y: number } | null> {
     return js(`(() => {
-      const el = document.querySelector(${JSON.stringify(selector)})
+      const el = ${findOne(target)}
       if (!el) return null
       el.scrollIntoView({ block: 'center', inline: 'center' })
       const r = el.getBoundingClientRect()
@@ -34,18 +35,18 @@ export function createApi(getWc: () => WebContents, emit: Emit) {
     })()`)
   }
 
-  async function present(selector: string, timeout: number): Promise<boolean> {
+  async function present(target: Target, timeout: number): Promise<boolean> {
     const started = Date.now()
     for (;;) {
-      if (await js<boolean>(`!!document.querySelector(${JSON.stringify(selector)})`)) return true
+      if (await js<number>(`${findAll(target)}.length`)) return true
       if (Date.now() - started > timeout) return false
       await sleep(100)
     }
   }
 
-  async function waitFor(selector: string, timeout = 5000): Promise<true> {
-    if (await present(selector, timeout)) return true
-    throw new Error(`waitFor timeout: ${selector}`)
+  async function waitFor(target: Target, timeout = 5000): Promise<true> {
+    if (await present(target, timeout)) return true
+    throw new Error(`waitFor timeout: ${describeTarget(target)}`)
   }
 
   /**
@@ -53,19 +54,32 @@ export function createApi(getWc: () => WebContents, emit: Emit) {
    * client finishes loading well before the DOM exists, so reading straight
    * after goto() used to return null with nothing to explain why.
    */
-  async function require(selector: string, method: string, timeout: number): Promise<void> {
-    if (await present(selector, timeout)) return
-    throw new Error(
-      `${method}("${selector}"): no element matched within ${timeout}ms. ` +
-        `Use count() if it is expected to be absent.`
-    )
+  async function require(target: Target, method: string, timeout: number): Promise<void> {
+    if (!(await present(target, timeout))) {
+      throw new Error(
+        `${method}(${describeTarget(target)}): no element matched within ${timeout}ms. ` +
+          `Use count() if it is expected to be absent.`
+      )
+    }
+    // A CSS selector takes the first match, like querySelector. A text match
+    // that hits several elements is almost always a mistake: silently picking
+    // one is how you end up clicking the wrong button.
+    if (typeof target === 'string') return
+    const m = await js<{ n: number; shown: string[] }>(describeMatches(target))
+    if (m.n > 1) {
+      throw new Error(
+        `${method}(${describeTarget(target)}): ${m.n} elements matched: ` +
+          `${m.shown.join(', ')}${m.n > 4 ? ', …' : ''}. ` +
+          `Narrow the pattern, or use a CSS selector.`
+      )
+    }
   }
 
-  async function click(selector: string): Promise<void> {
-    await waitFor(selector)
+  async function click(target: Target): Promise<void> {
+    await require(target, 'click', 5000)
     markAction()
-    const b = await boxOf(selector)
-    if (!b) throw new Error(`click: not visible: ${selector}`)
+    const b = await boxOf(target, 'click')
+    if (!b) throw new Error(`click(${describeTarget(target)}): matched but not visible`)
     const at = { x: Math.round(b.x), y: Math.round(b.y) }
     wc().sendInputEvent({ type: 'mouseMove', ...at })
     wc().sendInputEvent({ type: 'mouseDown', ...at, button: 'left', clickCount: 1 })
@@ -73,8 +87,8 @@ export function createApi(getWc: () => WebContents, emit: Emit) {
     await sleep(60)
   }
 
-  async function type(selector: string, value: unknown): Promise<void> {
-    await click(selector)
+  async function type(target: Target, value: unknown): Promise<void> {
+    await click(target)
     for (const ch of String(value)) {
       wc().sendInputEvent({ type: 'char', keyCode: ch })
       await sleep(12)
@@ -148,25 +162,36 @@ export function createApi(getWc: () => WebContents, emit: Emit) {
     press,
     waitFor,
     waitForNavigation,
-    async text(sel: string, timeout = 5000): Promise<string> {
-      await require(sel, 'text', timeout)
-      return js<string>(`document.querySelector(${JSON.stringify(sel)}).textContent.trim()`)
+    async text(target: Target, timeout = 5000): Promise<string> {
+      await require(target, 'text', timeout)
+      return js<string>(`${findOne(target)}.textContent.replace(/\\s+/g, ' ').trim()`)
     },
-    async attr(sel: string, name: string, timeout = 5000): Promise<string | null> {
-      await require(sel, 'attr', timeout)
+    async attr(target: Target, name: string, timeout = 5000): Promise<string | null> {
+      await require(target, 'attr', timeout)
       return js<string | null>(
-        `document.querySelector(${JSON.stringify(sel)}).getAttribute(${JSON.stringify(name)})`
+        `${findOne(target)}.getAttribute(${JSON.stringify(name)})`
       )
     },
     // count/texts answer "however many there are", zero included, so they
     // never wait. They are the way to assert absence.
-    texts: (sel: string) =>
-      js<string[]>(`[...document.querySelectorAll(${JSON.stringify(sel)})].map(e => e.textContent.trim())`),
-    count: (sel: string) => js<number>(`document.querySelectorAll(${JSON.stringify(sel)}).length`),
+    texts: (target: Target) =>
+      js<string[]>(`${findAll(target)}.map((e) => e.textContent.replace(/\\s+/g, ' ').trim())`),
+    count: (target: Target) => js<number>(`${findAll(target)}.length`),
     url: async () => wc().getURL(),
     title: async () => wc().getTitle(),
-    evaluate: <T>(expr: string | (() => T)) =>
-      js<T>(typeof expr === 'function' ? `(${expr})()` : expr),
+    // Errors thrown in the page reach us as "Script failed to execute" with the
+    // message gone, so the result is wrapped and rethrown on this side.
+    async evaluate<T>(expr: string | (() => T)): Promise<T> {
+      const src = typeof expr === 'function' ? `(${expr})()` : expr
+      const r = await js<{ ok: true; v: T } | { ok: false; m: string }>(
+        `(async () => {
+          try { return { ok: true, v: await (${src}) } }
+          catch (e) { return { ok: false, m: String((e && e.message) || e) } }
+        })()`
+      )
+      if (!r.ok) throw new Error(`evaluate: ${r.m}`)
+      return r.v
+    },
     sleep,
     log,
     expect: createExpect(emit),

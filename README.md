@@ -30,15 +30,30 @@ Ctrl+Enter 또는 Run 버튼으로 버퍼를 실행한다.
 | --- | --- |
 | `goto(url)` | 이동 (이미 그 주소면 그대로 둔다) |
 | `reload()` | 실제로 다시 불러오기 |
-| `click(sel)` / `type(sel, text)` / `press(key)` | 신뢰된 입력 |
-| `waitFor(sel, ms)` / `waitForNavigation(ms)` | 대기 |
-| `text(sel)` / `attr(sel, name)` | 읽기 (요소를 기다린다) |
-| `texts(sel)` / `count(sel)` | 개수 세기 (기다리지 않는다) |
+| `click(대상)` / `type(대상, text)` / `press(key)` | 신뢰된 입력 |
+| `waitFor(대상, ms)` / `waitForNavigation(ms)` | 대기 |
+| `text(대상)` / `attr(대상, name)` | 읽기 (요소를 기다린다) |
+| `texts(대상)` / `count(대상)` | 개수 세기 (기다리지 않는다) |
 | `url()` / `title()` / `evaluate(code)` | 페이지 상태 |
 | `expect(v)` | vitest 매처 전체 (`toEqual` `toStrictEqual` `toMatchObject` `toContain` `toHaveProperty` `toBeCloseTo` …) |
 | `sleep(ms)` / `log(...)` | 보조 |
 
 `require`도 주입되어 있다. 메인 프로세스라 Node 전체가 열려 있고 MV3 CSP가 없다.
+
+선택자 자리에는 CSS 선택자 대신 **정규식**을 넣어 텍스트로 찾을 수 있다.
+`text(/3진료실/)`, `click(/저장/)` 처럼 어디서나 통한다.
+
+testing-library의 `getNodeText` 방식을 가져왔다. 요소의 **직계 텍스트 노드만** 센다.
+그래야 `<div><span>3진료실</span></div>` 에서 span 하나만 걸리고, 감싸는 div 와 body 까지
+전부 걸리지 않는다. 공백도 같은 방식으로 정규화하므로 여러 줄에 걸쳐 쓰인 마크업도
+화면에 보이는 대로 매치된다.
+
+CSS 선택자는 `querySelector` 처럼 첫 번째를 쓴다. 정규식이 여러 개에 걸리면 대신
+무엇이 걸렸는지 말하며 실패한다. 하나를 몰래 고르는 건 엉뚱한 버튼을 누르는 길이다.
+
+```
+text(/중복/): 2 elements matched: p "중복", p "중복". Narrow the pattern, or use a CSS selector.
+```
 
 `goto`는 이미 그 주소에 있으면 아무것도 하지 않는다. `goto`로 시작하는 버퍼를 수십 번
 돌리는 게 기본 사용 방식인데, 매번 페이지를 새로 띄우면 이 도구의 존재 이유가 사라진다.
