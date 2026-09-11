@@ -166,6 +166,45 @@ await waitFor('#nope', 300)
 `)
 check('API 실패도 사용자 줄로', /line 2: waitFor timeout/.test(log3), true)
 
+// ---- 2c. 읽기도 상호작용처럼 요소를 기다린다 ----
+// 클라이언트 렌더링 앱에서 goto 직후 text() 가 조용히 null 을 내던 문제.
+const logSpa = await runCode(`
+await goto('${site}/spa.html')
+log('바로 읽기:', await text('h1'))
+`)
+check('늦게 그려지는 요소를 기다림', /바로 읽기: 진료실 관리/.test(logSpa), true)
+
+const logMissing = await runCode(`await goto('${site}/page2.html')\nawait text('h9', 400)`)
+check('없는 요소는 이유를 말하며 실패', /text\("h9"\): no element matched within 400ms/.test(logMissing), true)
+check('없는 요소 실패도 사용자 줄로', /line 2:/.test(logMissing), true)
+
+const logAbsent = await runCode(`await goto('${site}/page2.html')\nlog('count:', String(await count('h9')))\nlog('texts:', JSON.stringify(await texts('h9')))`)
+check('count 는 기다리지 않고 0', /count: 0/.test(logAbsent), true)
+check('texts 는 기다리지 않고 빈 배열', /texts: \[\]/.test(logAbsent), true)
+
+// ---- 2d. goto 를 반복해도 페이지가 유지된다 ----
+// goto 로 시작하는 버퍼를 여러 번 돌리는 것이 기본 사용 방식이다. 두 번째 실행부터는
+// 이미 그 주소에 있으므로 페이지를 버리면 안 된다.
+await runCode(`await goto('${site}/page2.html')`)
+let v = (await browser.pages()).find((p) => !p.url().includes('index.html'))
+await v.evaluate(() => { window.__survives = 'YES' })
+
+const logAgain = await runCode(`await goto('${site}/page2.html')\nlog('title:', await title())`)
+v = (await browser.pages()).find((p) => !p.url().includes('index.html'))
+check('같은 주소로 goto 는 그대로 둠', /already at/.test(logAgain), true)
+check('반복 goto 후 페이지 상태 유지', await v.evaluate(() => window.__survives ?? '(날아감)').catch(() => '(파괴됨)'), 'YES')
+
+// 다른 주소로는 당연히 이동한다
+await runCode(`await goto('${site}/page1.html')`)
+v = (await browser.pages()).find((p) => !p.url().includes('index.html'))
+check('다른 주소로는 이동', v.url().endsWith('/page1.html'), true)
+
+// 진짜로 다시 불러오고 싶으면 reload()
+await v.evaluate(() => { window.__survives = 'YES' })
+await runCode(`await reload()`)
+v = (await browser.pages()).find((p) => !p.url().includes('index.html'))
+check('reload 는 실제로 다시 불러옴', await v.evaluate(() => window.__survives ?? '(날아감)').catch(() => '(파괴됨)'), '(날아감)')
+
 // ---- 3. 버퍼 전환 ----
 const a = await panel.evaluate(() => window.poke.createBuffer('alpha'))
 await panel.evaluate((id) => window.__pokeTest.openBuffer(id), a.id)

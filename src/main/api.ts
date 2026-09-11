@@ -34,13 +34,31 @@ export function createApi(getWc: () => WebContents, emit: Emit) {
     })()`)
   }
 
-  async function waitFor(selector: string, timeout = 5000): Promise<true> {
+  async function present(selector: string, timeout: number): Promise<boolean> {
     const started = Date.now()
     for (;;) {
       if (await js<boolean>(`!!document.querySelector(${JSON.stringify(selector)})`)) return true
-      if (Date.now() - started > timeout) throw new Error(`waitFor timeout: ${selector}`)
+      if (Date.now() - started > timeout) return false
       await sleep(100)
     }
+  }
+
+  async function waitFor(selector: string, timeout = 5000): Promise<true> {
+    if (await present(selector, timeout)) return true
+    throw new Error(`waitFor timeout: ${selector}`)
+  }
+
+  /**
+   * Readers wait the same way interactions do. A dev server rendering on the
+   * client finishes loading well before the DOM exists, so reading straight
+   * after goto() used to return null with nothing to explain why.
+   */
+  async function require(selector: string, method: string, timeout: number): Promise<void> {
+    if (await present(selector, timeout)) return
+    throw new Error(
+      `${method}("${selector}"): no element matched within ${timeout}ms. ` +
+        `Use count() if it is expected to be absent.`
+    )
   }
 
   async function click(selector: string): Promise<void> {
@@ -84,11 +102,36 @@ export function createApi(getWc: () => WebContents, emit: Emit) {
     })
   }
 
+  /** Same address, ignoring differences the browser itself normalises away. */
+  function sameUrl(a: string, b: string): boolean {
+    try {
+      return new URL(a).href === new URL(b).href
+    } catch {
+      return a === b
+    }
+  }
+
+  /**
+   * Navigating away is the one thing this tool is supposed not to do on its
+   * own. A buffer that opens with goto() gets run dozens of times, and every
+   * run after the first would otherwise throw the page state away. So going
+   * to where you already are does nothing; ask for reload() when you mean it.
+   */
   async function goto(target: string): Promise<void> {
+    if (sameUrl(wc().getURL(), target)) {
+      emit({ kind: 'dim', message: `  · goto: already at ${target}` })
+      return
+    }
     markAction()
     await wc().loadURL(target)
     actionSeq = navSeq
     await sleep(80)
+  }
+
+  async function reload(): Promise<void> {
+    markAction()
+    wc().reload()
+    await waitForNavigation()
   }
 
   const log = (...args: unknown[]): void =>
@@ -99,20 +142,27 @@ export function createApi(getWc: () => WebContents, emit: Emit) {
 
   const api = {
     goto,
+    reload,
     click,
     type,
     press,
     waitFor,
     waitForNavigation,
-    text: (sel: string) =>
-      js<string | null>(`(document.querySelector(${JSON.stringify(sel)})||{}).textContent?.trim() ?? null`),
+    async text(sel: string, timeout = 5000): Promise<string> {
+      await require(sel, 'text', timeout)
+      return js<string>(`document.querySelector(${JSON.stringify(sel)}).textContent.trim()`)
+    },
+    async attr(sel: string, name: string, timeout = 5000): Promise<string | null> {
+      await require(sel, 'attr', timeout)
+      return js<string | null>(
+        `document.querySelector(${JSON.stringify(sel)}).getAttribute(${JSON.stringify(name)})`
+      )
+    },
+    // count/texts answer "however many there are", zero included, so they
+    // never wait. They are the way to assert absence.
     texts: (sel: string) =>
       js<string[]>(`[...document.querySelectorAll(${JSON.stringify(sel)})].map(e => e.textContent.trim())`),
     count: (sel: string) => js<number>(`document.querySelectorAll(${JSON.stringify(sel)}).length`),
-    attr: (sel: string, name: string) =>
-      js<string | null>(
-        `(document.querySelector(${JSON.stringify(sel)})||{}).getAttribute?.(${JSON.stringify(name)}) ?? null`
-      ),
     url: async () => wc().getURL(),
     title: async () => wc().getTitle(),
     evaluate: <T>(expr: string | (() => T)) =>
