@@ -31,12 +31,18 @@ Ctrl+Enter 또는 Run 버튼으로 버퍼를 실행한다.
 | `goto(url)` | 이동 |
 | `click(sel)` / `type(sel, text)` / `press(key)` | 신뢰된 입력 |
 | `waitFor(sel, ms)` / `waitForNavigation(ms)` | 대기 |
-| `text(sel)` / `texts(sel)` / `count(sel)` / `attr(sel, name)` | 읽기 |
+| `text(sel)` / `attr(sel, name)` | 읽기 (요소를 기다린다) |
+| `texts(sel)` / `count(sel)` | 개수 세기 (기다리지 않는다) |
 | `url()` / `title()` / `evaluate(code)` | 페이지 상태 |
 | `expect(v)` | vitest 매처 전체 (`toEqual` `toStrictEqual` `toMatchObject` `toContain` `toHaveProperty` `toBeCloseTo` …) |
 | `sleep(ms)` / `log(...)` | 보조 |
 
 `require`도 주입되어 있다. 메인 프로세스라 Node 전체가 열려 있고 MV3 CSP가 없다.
+
+`click`, `type`, `text`, `attr`은 요소가 나타날 때까지 기다렸다가(기본 5초) 없으면
+이유를 말하며 실패한다. 클라이언트에서 그리는 앱은 로딩이 끝난 뒤에 DOM이 생기므로
+`goto` 직후에 바로 읽으면 아무것도 없다. 반대로 `count`와 `texts`는 기다리지 않는다.
+없다는 것을 확인할 때 쓰라고 남겨둔 것이다.
 
 단언은 `@vitest/expect`를 러너 없이 세워서 쓴다. `expect.any`, `expect.arrayContaining`
 같은 비대칭 매처도 그대로 된다. 실패하면 diff가 로그에 붙는다.
