@@ -62,6 +62,33 @@ for (let i = 0; i < 40; i++) {
   await wait(250)
 }
 
+// ---- 0. 기본 버퍼를 진짜 버튼으로 돌려도 페이지가 그대로여야 한다 ----
+// 기본 버퍼가 goto 로 시작하는 바람에 Run 을 누를 때마다 페이지가 다시 뜨던 적이 있다.
+// runCode 는 버퍼를 덮어쓰므로, 반드시 그 전에 확인해야 한다.
+const seed = await panel.evaluate(() => window.__pokeTest.getCode())
+check('기본 버퍼에 goto 없음', /\bgoto\(/.test(seed.replace(/^\s*\/\/.*$/gm, '')), false)
+
+await panel.evaluate((u) => window.poke.goto(u), `${site}/page2.html`)
+await wait(1200)
+const viewBefore = (await browser.pages()).find((p) => !p.url().includes('index.html'))
+await viewBefore.evaluate(() => { window.__kept = 'STILL-HERE' })
+
+await panel.click('#run') // 합성 호출이 아니라 실제 버튼 클릭
+for (let i = 0; i < 60; i++) {
+  const log = await panel.evaluate(() => window.__pokeTest.log())
+  if (/done \(|error:|line \d+:/.test(log)) break
+  await wait(250)
+}
+const seedLog = await panel.evaluate(() => window.__pokeTest.log())
+const viewAfter = (await browser.pages()).find((p) => !p.url().includes('index.html'))
+check('버튼 클릭으로 실행됨', /done \(/.test(seedLog), true)
+check('기본 버퍼 실행이 페이지를 유지', viewAfter.url().endsWith('/page2.html'), true)
+check(
+  '기본 버퍼 실행이 페이지 상태를 유지',
+  await viewAfter.evaluate(() => window.__kept ?? '(날아감)').catch(() => '(컨텍스트 파괴됨)'),
+  'STILL-HERE'
+)
+
 const runCode = async (code) => {
   await panel.evaluate((c) => window.__pokeTest.setCode(c), code)
   await panel.evaluate(() => window.__pokeTest.run())

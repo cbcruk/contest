@@ -2,13 +2,20 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { BufferMeta } from '../shared/types'
 
-const SEED = `// poke — 지금 보고 있는 화면 그대로에 코드를 쏜다.
-// goto 를 지우면 현재 페이지에 그대로 이어붙는다.
+// The seed must not navigate. Run is supposed to leave the page exactly where
+// it is; a goto here would throw that away on every click, which is the one
+// thing this tool exists to avoid.
+const SEED = `// poke — 지금 보고 있는 화면에 그대로 코드를 쏜다.
+// 주소는 위 URL 칸에서 옮긴다. Run 은 페이지를 건드리지 않는다.
 
-await goto('http://localhost:3000')
+log('주소:', await url())
 log('제목:', await title())
 
-expect(await text('h1')).toBeTruthy()
+// 클릭과 입력은 신뢰된 이벤트로 나간다.
+// await click('button[type=submit]')
+// await type('#email', 'a@b.co')
+
+expect(await title()).toBeTruthy()
 `
 
 /** Buffers are plain .js files so they can be opened in any editor. */
