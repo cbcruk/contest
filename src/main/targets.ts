@@ -41,8 +41,20 @@ export function describeTarget(t: Target): string {
   }${suffix})`
 }
 
+/** `'/foo/'` is a string, and a CSS selector can never look like that. */
+const LOOKS_LIKE_REGEXP = /^\/(.+)\/([gimsuy]*)$/
+
 export function toDescriptor(t: Target): Descriptor {
-  if (typeof t === 'string') return { kind: 'css', literal: t }
+  if (typeof t === 'string') {
+    const asRegexp = LOOKS_LIKE_REGEXP.exec(t)
+    if (asRegexp) {
+      throw new Error(
+        `"${t}" is a string, so it is used as a CSS selector. ` +
+          `Drop the quotes to match by text instead: ${t}`
+      )
+    }
+    return { kind: 'css', literal: t }
+  }
   if (t instanceof RegExp) return { kind: 'text', source: t.source, flags: t.flags }
 
   const options: Record<string, unknown> = {}

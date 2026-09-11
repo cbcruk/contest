@@ -270,6 +270,16 @@ log('다시 이동 후:', await text(byRole('heading')))
 check('이동 후 월드 재생성', /이동 후: Page Two/.test(logAfterNav), true)
 check('재이동 후에도 동작', /다시 이동 후: 진료실 관리/.test(logAfterNav), true)
 
+// ---- 2g. 잘못된 선택자를 poke 의 말로 설명한다 ----
+// '/3진료실/' 은 정규식처럼 보이지만 문자열이라 CSS 선택자 자리로 간다.
+const logQuoted = await runCode(`await text('/3진료실/')`)
+check('따옴표 친 정규식을 짚어줌', /is a string, so it is used as a CSS selector/.test(logQuoted), true)
+check('고치는 법을 알려줌', /Drop the quotes to match by text instead: \/3진료실\//.test(logQuoted), true)
+check('querySelectorAll 을 들먹이지 않음', /querySelectorAll/.test(logQuoted), false)
+
+const logBadCss = await runCode(`await goto('${site}/rooms.html')\nawait text('div[')`)
+check('잘못된 선택자도 poke 의 말로', /"div\[" is not a valid CSS selector/.test(logBadCss), true)
+
 // ---- 3. 버퍼 전환 ----
 const a = await panel.evaluate(() => window.poke.createBuffer('alpha'))
 await panel.evaluate((id) => window.__pokeTest.openBuffer(id), a.id)

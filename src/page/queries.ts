@@ -53,7 +53,15 @@ function optionsOf(d: Descriptor): Record<string, unknown> | undefined {
 }
 
 function all(d: Descriptor): Element[] {
-  if (d.kind === 'css') return [...document.querySelectorAll(d.literal as string)]
+  if (d.kind === 'css') {
+    try {
+      return [...document.querySelectorAll(d.literal as string)]
+    } catch {
+      // The browser's own message names querySelectorAll, which a buffer
+      // never called.
+      throw new Error(`"${d.literal}" is not a valid CSS selector`)
+    }
+  }
   const query = QUERIES[d.kind]
   if (!query) throw new Error(`unknown target kind: ${d.kind}`)
   return query(document.body, matcherOf(d), optionsOf(d))
