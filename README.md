@@ -15,37 +15,76 @@ Playwright를 대체하지 않는다. **테스트를 쓰기 전 단계**의 도�
 
 대상은 localhost와 개발 서버의 내 앱이다. 타사이트 자동화는 범위 밖이다.
 
+## 실행
+
 ```sh
 pnpm install
-pnpm --filter poke start
+pnpm start
 ```
 
-자세한 사용법은 [`packages/poke/README.md`](packages/poke/README.md)에 있다.
+Ctrl+Enter 또는 Run 버튼으로 버퍼를 실행한다.
+
+## 버퍼 API
+
+| | |
+| --- | --- |
+| `goto(url)` | 이동 |
+| `click(sel)` / `type(sel, text)` / `press(key)` | 신뢰된 입력 |
+| `waitFor(sel, ms)` / `waitForNavigation(ms)` | 대기 |
+| `text(sel)` / `texts(sel)` / `count(sel)` / `attr(sel, name)` | 읽기 |
+| `url()` / `title()` / `evaluate(code)` | 페이지 상태 |
+| `expect(v)` | `toBe` `toEqual` `toContain` `toHaveLength` `toBeTruthy` `toBeFalsy` `toBeNull` `toThrow` |
+| `sleep(ms)` / `log(...)` | 보조 |
+
+`require`도 주입되어 있다. 메인 프로세스라 Node 전체가 열려 있고 MV3 CSP가 없다.
+
+`describe`와 `it`은 없다. 단언은 로그에 한 줄씩 체크 표시로만 남는다.
+
+## 버퍼
+
+시나리오별로 나눠 둔다. 상단 탭에서 전환하고, 더블클릭으로 이름 변경,
+가운데 클릭으로 삭제한다. `userData/buffers/*.js`에 평범한 JS 파일로 저장된다.
+
+## 검증
+
+```sh
+pnpm smoke
+```
+
+Xvfb 위에 앱을 띄우고 자기 UI를 CDP로 조작해 13개 항목을 확인한다.
+`isTrusted: true`와 이동 후 코드 계속 실행이 핵심이다.
+
+## 구조
+
+메인과 preload는 `tsc`로 CommonJS, 렌더러는 Vite로 ESM 번들이다.
+Electron에서 함정이 가장 적은 조합이다.
+
+```
+src/main/      index.ts api.ts runner.ts buffers.ts expect.ts
+src/preload/   index.ts
+src/renderer/  index.html main.ts editor.ts styles.css
+src/shared/    types.ts
+test/          smoke.mjs
+```
+
+`runner.ts`는 `new AsyncFunction`이 본문을 감싸며 밀리는 줄 번호를 보정한다.
+오프셋은 현재 V8에서 2지만 하드코딩하지 않고 기동 시 1회 측정한다.
 
 ## 어쩌다 여기까지 왔는가
 
 이 저장소는 `contest`라는 이름으로 "브라우저 런타임에서 e2e 테스트를 실행한다"에서
 시작했다. 실제 동기는 개발하면서 내 앱을 가볍게 찔러보는 것이었고, 그 간극이
-오래 남았다. 세 가지를 확인하고 나서 방향을 정리했다.
+오래 남았다. 확장 기반 구현을 실제로 측정하고 나서 방향을 정리했다.
 
-1. **MV3는 확장 페이지에서 `eval`을 막는다.** 그래서 아래 `packages/extension`의
-   "사용자 작성 테스트" 기능은 실제로 동작한 적이 없다. Run을 누르면 CSP 오류가 난다.
-2. **Chrome 136은 기본 프로필의 원격 디버깅을 막았다.** `/json/version`이 빈 응답이다.
-   즉 이미 열려 있는 내 크롬에 붙는 길은 확장뿐이고, 그 문은 닫히는 방향이다.
+1. **MV3는 확장 페이지에서 `eval`을 막는다.** 그래서 이전 구현의 "사용자 작성 테스트"
+   기능은 실제로 동작한 적이 없었다.
+2. **Chrome 136은 기본 프로필의 원격 디버깅을 막았다.** 이미 열려 있는 내 크롬에
+   붙는 길은 확장뿐이고, 그 문은 닫히는 방향이다.
 3. **Electron에서는 이 제약이 전부 사라진다.** 메인 프로세스는 그냥 Node다.
    대신 내 크롬의 로그인 세션은 따라오지 않는데, 대상이 내 개발 서버라면 비용이 아니다.
 
-과정은 [`docs/direction.md`](docs/direction.md)에 남아 있다.
-
-## 이전 패키지
-
-`packages/contest`, `packages/e2e`, `packages/extension`은 확장 기반의 이전 구현이다.
-아직 정리하지 않았고 poke는 이들에 의존하지 않는다. 참고할 때 두 가지를 유의할 것.
-
-- 확장의 사용자 작성 테스트는 MV3 CSP 때문에 동작하지 않는다.
-- `@contest/core`의 `toEqual`은 JSON 문자열 비교라 키 순서, `undefined` 속성,
-  `NaN`, `Date`, `Map`에서 오답이 나온다. poke는 재귀 비교로 다시 썼다
-  (`packages/poke/src/main/expect.ts`).
+측정 결과는 [`docs/findings.md`](docs/findings.md)에 있다.
+확장 기반의 이전 구현은 `27ee266` 이전 커밋에 남아 있다.
 
 ## 라이선스
 

@@ -1,7 +1,3 @@
-packages:
-  - 'packages/*'
-
-# electron's postinstall downloads the binary; pnpm 11 needs this approval.
+# Single package, no workspace globs. This file only carries pnpm settings.
 allowBuilds:
-  electron: true
   esbuild: true
