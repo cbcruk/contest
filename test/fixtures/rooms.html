@@ -1,9 +1,20 @@
-<!DOCTYPE html><html><head><meta charset="utf-8"><title>진료실</title></head>
+<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8"><title>진료실</title></head>
 <body>
   <div id="app">
+    <h1>진료실 관리</h1>
     <div class="card"><span class="label">3진료실</span></div>
     <div class="card"><span class="label">4진료실</span></div>
+
+    <label for="email">이메일</label>
+    <input id="email" />
+    <input id="q" placeholder="검색어" />
+    <img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" alt="로고" />
+    <div data-testid="room-list">목록</div>
+
     <button id="save">저장</button>
+    <button id="cancel">취소</button>
+    <a href="#none">도움말</a>
+
     <div class="wrapped">
       여러 줄에
       걸친 텍스트
@@ -11,8 +22,7 @@
     <p class="dup">중복</p><p class="dup">중복</p>
   </div>
   <script>
-    document.getElementById('save').addEventListener('click', () => {
-      document.title = 'SAVED'
-    })
+    document.getElementById('save').addEventListener('click', () => { document.title = 'SAVED' })
+    document.getElementById('cancel').addEventListener('click', () => { document.title = 'CANCELLED' })
   </script>
 </body></html>

@@ -34,26 +34,44 @@ Ctrl+Enter 또는 Run 버튼으로 버퍼를 실행한다.
 | `waitFor(대상, ms)` / `waitForNavigation(ms)` | 대기 |
 | `text(대상)` / `attr(대상, name)` | 읽기 (요소를 기다린다) |
 | `texts(대상)` / `count(대상)` | 개수 세기 (기다리지 않는다) |
+| `byRole` `byLabel` `byPlaceholder` `byTestId` `byAlt` `byTitle` `byText` `byDisplayValue` | testing-library 쿼리 |
+| `roles()` | 페이지에 실제로 있는 role 목록 |
 | `url()` / `title()` / `evaluate(code)` | 페이지 상태 |
 | `expect(v)` | vitest 매처 전체 (`toEqual` `toStrictEqual` `toMatchObject` `toContain` `toHaveProperty` `toBeCloseTo` …) |
 | `sleep(ms)` / `log(...)` | 보조 |
 
 `require`도 주입되어 있다. 메인 프로세스라 Node 전체가 열려 있고 MV3 CSP가 없다.
 
-선택자 자리에는 CSS 선택자 대신 **정규식**을 넣어 텍스트로 찾을 수 있다.
-`text(/3진료실/)`, `click(/저장/)` 처럼 어디서나 통한다.
+## 요소 지목하기
 
-testing-library의 `getNodeText` 방식을 가져왔다. 요소의 **직계 텍스트 노드만** 센다.
-그래야 `<div><span>3진료실</span></div>` 에서 span 하나만 걸리고, 감싸는 div 와 body 까지
-전부 걸리지 않는다. 공백도 같은 방식으로 정규화하므로 여러 줄에 걸쳐 쓰인 마크업도
-화면에 보이는 대로 매치된다.
+선택자 자리에 세 가지를 넣을 수 있다.
 
-CSS 선택자는 `querySelector` 처럼 첫 번째를 쓴다. 정규식이 여러 개에 걸리면 대신
-무엇이 걸렸는지 말하며 실패한다. 하나를 몰래 고르는 건 엉뚱한 버튼을 누르는 길이다.
+```js
+await text('h1')                              // CSS 선택자
+await text(/3진료실/)                          // 정규식 → 텍스트로 찾기
+await click(byRole('button', { name: /저장/ })) // testing-library 쿼리
+```
+
+텍스트 쪽은 전부 **testing-library** 가 처리한다. 직접 구현하지 않았다.
+`byRole` 은 접근성 이름으로 찾는데, 이걸 손으로 만들려면 `aria-query` 와
+`dom-accessibility-api` 가 하는 일을 다시 해야 한다.
+
+CSS 선택자는 `querySelector` 처럼 첫 번째를 쓴다. 나머지는 하나를 지목하라는 뜻이라
+여러 개에 걸리면 무엇이 걸렸는지 말하며 실패한다. 하나를 몰래 고르는 건 엉뚱한
+버튼을 누르는 길이다.
 
 ```
 text(/중복/): 2 elements matched: p "중복", p "중복". Narrow the pattern, or use a CSS selector.
 ```
+
+### 격리 월드
+
+testing-library 는 DOM 안에서 돌아야 하는데, 남의 앱 페이지에 180kB 와 전역 하나를
+얹는 건 실례다. 그래서 CDP 격리 월드에 넣는다. DOM 은 공유하고 JS 전역은 분리되므로
+앱의 `window` 는 손대지 않는다. 페이지가 이동하면 월드가 사라지므로 다음 호출 때
+다시 만든다.
+
+`evaluate()` 만은 페이지 본체에서 돈다. 앱의 전역을 보려고 쓰는 것이기 때문이다.
 
 `goto`는 이미 그 주소에 있으면 아무것도 하지 않는다. `goto`로 시작하는 버퍼를 수십 번
 돌리는 게 기본 사용 방식인데, 매번 페이지를 새로 띄우면 이 도구의 존재 이유가 사라진다.
