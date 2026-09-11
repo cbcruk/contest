@@ -166,6 +166,22 @@ await waitFor('#nope', 300)
 `)
 check('API 실패도 사용자 줄로', /line 2: waitFor timeout/.test(log3), true)
 
+// ---- 2c. 읽기도 상호작용처럼 요소를 기다린다 ----
+// 클라이언트 렌더링 앱에서 goto 직후 text() 가 조용히 null 을 내던 문제.
+const logSpa = await runCode(`
+await goto('${site}/spa.html')
+log('바로 읽기:', await text('h1'))
+`)
+check('늦게 그려지는 요소를 기다림', /바로 읽기: 진료실 관리/.test(logSpa), true)
+
+const logMissing = await runCode(`await goto('${site}/page2.html')\nawait text('h9', 400)`)
+check('없는 요소는 이유를 말하며 실패', /text\("h9"\): no element matched within 400ms/.test(logMissing), true)
+check('없는 요소 실패도 사용자 줄로', /line 2:/.test(logMissing), true)
+
+const logAbsent = await runCode(`await goto('${site}/page2.html')\nlog('count:', String(await count('h9')))\nlog('texts:', JSON.stringify(await texts('h9')))`)
+check('count 는 기다리지 않고 0', /count: 0/.test(logAbsent), true)
+check('texts 는 기다리지 않고 빈 배열', /texts: \[\]/.test(logAbsent), true)
+
 // ---- 3. 버퍼 전환 ----
 const a = await panel.evaluate(() => window.poke.createBuffer('alpha'))
 await panel.evaluate((id) => window.__pokeTest.openBuffer(id), a.id)
