@@ -1,6 +1,7 @@
 import type { WebContents } from 'electron'
 import { createExpect } from './expect'
-import { describeMatches, describeTarget, findAll, findOne, type Target } from './find'
+import { by, describeTarget, expectsOne, toDescriptor, type Target } from './targets'
+import { World } from './world'
 import type { LogLine } from '../shared/types'
 
 export type Emit = (line: LogLine) => void
@@ -14,7 +15,10 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
  */
 export function createApi(getWc: () => WebContents, emit: Emit) {
   const wc = getWc
+  // User code runs in the page itself, where the app's own globals are.
   const js = <T>(expr: string): Promise<T> => wc().executeJavaScript(expr, true) as Promise<T>
+  // Element queries run beside the page, where testing-library lives.
+  const world = new World(getWc)
 
   // Navigation bookkeeping. A click often finishes navigating before the user's
   // next line runs, so waitForNavigation() must be able to see a load that
@@ -22,23 +26,20 @@ export function createApi(getWc: () => WebContents, emit: Emit) {
   let navSeq = 0
   let actionSeq = 0
   const markAction = (): void => { actionSeq = navSeq }
-  const onDidFinishLoad = (): void => { navSeq += 1 }
-
-  async function boxOf(target: Target, method: string): Promise<{ x: number; y: number } | null> {
-    return js(`(() => {
-      const el = ${findOne(target)}
-      if (!el) return null
-      el.scrollIntoView({ block: 'center', inline: 'center' })
-      const r = el.getBoundingClientRect()
-      if (r.width === 0 && r.height === 0) return null
-      return { x: r.left + r.width / 2, y: r.top + r.height / 2 }
-    })()`)
+  const onDidFinishLoad = (): void => {
+    navSeq += 1
+    world.invalidate() // navigation destroys the isolated world
   }
+
+  const boxOf = (target: Target): Promise<{ x: number; y: number } | null> =>
+    world.query('box', toDescriptor(target))
+
+  const countOf = (target: Target): Promise<number> => world.query('count', toDescriptor(target))
 
   async function present(target: Target, timeout: number): Promise<boolean> {
     const started = Date.now()
     for (;;) {
-      if (await js<number>(`${findAll(target)}.length`)) return true
+      if (await countOf(target)) return true
       if (Date.now() - started > timeout) return false
       await sleep(100)
     }
@@ -64,8 +65,8 @@ export function createApi(getWc: () => WebContents, emit: Emit) {
     // A CSS selector takes the first match, like querySelector. A text match
     // that hits several elements is almost always a mistake: silently picking
     // one is how you end up clicking the wrong button.
-    if (typeof target === 'string') return
-    const m = await js<{ n: number; shown: string[] }>(describeMatches(target))
+    if (!expectsOne(target)) return
+    const m = await world.query<{ n: number; shown: string[] }>('found', toDescriptor(target))
     if (m.n > 1) {
       throw new Error(
         `${method}(${describeTarget(target)}): ${m.n} elements matched: ` +
@@ -78,7 +79,7 @@ export function createApi(getWc: () => WebContents, emit: Emit) {
   async function click(target: Target): Promise<void> {
     await require(target, 'click', 5000)
     markAction()
-    const b = await boxOf(target, 'click')
+    const b = await boxOf(target)
     if (!b) throw new Error(`click(${describeTarget(target)}): matched but not visible`)
     const at = { x: Math.round(b.x), y: Math.round(b.y) }
     wc().sendInputEvent({ type: 'mouseMove', ...at })
@@ -162,21 +163,21 @@ export function createApi(getWc: () => WebContents, emit: Emit) {
     press,
     waitFor,
     waitForNavigation,
+    ...by,
     async text(target: Target, timeout = 5000): Promise<string> {
       await require(target, 'text', timeout)
-      return js<string>(`${findOne(target)}.textContent.replace(/\\s+/g, ' ').trim()`)
+      return world.query<string>('text', toDescriptor(target))
     },
     async attr(target: Target, name: string, timeout = 5000): Promise<string | null> {
       await require(target, 'attr', timeout)
-      return js<string | null>(
-        `${findOne(target)}.getAttribute(${JSON.stringify(name)})`
-      )
+      return world.query<string | null>('attr', toDescriptor(target), name)
     },
     // count/texts answer "however many there are", zero included, so they
     // never wait. They are the way to assert absence.
-    texts: (target: Target) =>
-      js<string[]>(`${findAll(target)}.map((e) => e.textContent.replace(/\\s+/g, ' ').trim())`),
-    count: (target: Target) => js<number>(`${findAll(target)}.length`),
+    texts: (target: Target) => world.query<string[]>('texts', toDescriptor(target)),
+    count: countOf,
+    /** Roles actually present, to make a failing byRole actionable. */
+    roles: () => world.call<string[]>('roles'),
     url: async () => wc().getURL(),
     title: async () => wc().getTitle(),
     // Errors thrown in the page reach us as "Script failed to execute" with the

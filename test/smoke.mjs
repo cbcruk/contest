@@ -232,6 +232,54 @@ check('없는 텍스트는 이유를 말하며 실패', /text\(\/없는텍스트
 const logEvalErr = await runCode(`await evaluate('nope.nope')`)
 check('evaluate 오류 메시지 보존', /evaluate: nope is not defined/.test(logEvalErr), true)
 
+// ---- 2f. testing-library 쿼리 (격리 월드에서) ----
+const logTL = await runCode(`
+await goto('${site}/rooms.html')
+log('role+name  :', await text(byRole('button', { name: /저장/ })))
+log('role 전체  :', JSON.stringify(await texts(byRole('button'))))
+log('label      :', await attr(byLabel('이메일'), 'id'))
+log('placeholder:', await attr(byPlaceholder('검색어'), 'id'))
+log('testId     :', await text(byTestId('room-list')))
+log('alt        :', await attr(byAlt('로고'), 'alt'))
+log('byText exact:', await text(byText('3진료실')))
+log('roles      :', JSON.stringify(await roles()))
+await click(byRole('button', { name: /취소/ }))
+log('클릭       :', await title())
+`)
+check('byRole + name', /role\+name  : 저장/.test(logTL), true)
+check('byRole 전체', /role 전체  : \["저장","취소"\]/.test(logTL), true)
+check('byLabel', /label      : email/.test(logTL), true)
+check('byPlaceholder', /placeholder: q/.test(logTL), true)
+check('byTestId', /testId     : 목록/.test(logTL), true)
+check('byAlt', /alt        : 로고/.test(logTL), true)
+check('byText 정확 일치', /byText exact: 3진료실/.test(logTL), true)
+check('roles 목록', /"button".*"link"/.test(logTL), true)
+check('byRole 로 클릭', /클릭       : CANCELLED/.test(logTL), true)
+
+// 격리 월드를 쓰는 이유: 앱의 전역을 건드리지 않는다
+const viewNow = (await browser.pages()).find((p) => !p.url().includes('index.html'))
+check('메인 월드 오염 없음', await viewNow.evaluate(() => typeof window.__poke), 'undefined')
+
+// 이동하면 월드가 사라지므로 다시 만들어야 한다
+const logAfterNav = await runCode(`
+await goto('${site}/page2.html')
+log('이동 후:', await text('h1'))
+await goto('${site}/rooms.html')
+log('다시 이동 후:', await text(byRole('heading')))
+`)
+check('이동 후 월드 재생성', /이동 후: Page Two/.test(logAfterNav), true)
+check('재이동 후에도 동작', /다시 이동 후: 진료실 관리/.test(logAfterNav), true)
+
+// ---- 2g. 잘못된 선택자를 poke 의 말로 설명한다 ----
+// '/3진료실/' 은 정규식처럼 보이지만 문자열이라 CSS 선택자 자리로 간다.
+const logQuoted = await runCode(`await text('/3진료실/')`)
+check('따옴표 친 정규식을 짚어줌', /is a string, so it is used as a CSS selector/.test(logQuoted), true)
+check('고치는 법을 알려줌', /Drop the quotes to match by text instead: \/3진료실\//.test(logQuoted), true)
+check('querySelectorAll 을 들먹이지 않음', /querySelectorAll/.test(logQuoted), false)
+
+const logBadCss = await runCode(`await goto('${site}/rooms.html')\nawait text('div[')`)
+check('잘못된 선택자도 poke 의 말로', /"div\[" is not a valid CSS selector/.test(logBadCss), true)
+
 // ---- 3. 버퍼 전환 ----
 const a = await panel.evaluate(() => window.poke.createBuffer('alpha'))
 await panel.evaluate((id) => window.__pokeTest.openBuffer(id), a.id)
